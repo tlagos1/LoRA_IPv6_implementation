@@ -30,6 +30,7 @@ Maintainer: Sylvain Miermont
 #include "loragw_radio.h"
 #include "loragw_fpga.h"
 #include "loragw_lbt.h"
+#include "loragw_ipv6.h"
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */

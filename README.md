@@ -14,7 +14,8 @@ By using RoHC, this implementation will build a table inside the LoRa gateway to
 
 In order to achieve our goal, we plan to use:
 
-	- 2 Modtronix inAir9 LoRa Modules
+	- 1 Modtronix inAir9 LoRa Modules
+	- 1 IC880A module
 	- 1 Raspberry Pi 2
 	- 1 Arduino uno
 
@@ -29,3 +30,5 @@ For the initial version of the project, the following software components are pl
 	https://github.com/Lora-net/lora_gateway
 
 ##Updates
+
+9/11/2016 : RoHC base and AES decryption added in LoRa GateWay. The hop limit is not configured.
