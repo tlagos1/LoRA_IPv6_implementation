@@ -6,6 +6,11 @@
 #define IPHC_DISPATCH              3
 
 
+#define IPv6_HEADER_LEN            40
+#define PAGE_ONE_DISPATCH          0xF1
+#define IPHC_DISPATCH              3
+
+
 #define IPHC_TF_4B                 0
 #define IPHC_TF_3B                 1
 #define IPHC_TF_1B                 2
@@ -43,6 +48,28 @@
 
 
 
+typedef struct ip6_hdr {
+    union {
+        struct ip6_hdrctl {
+            uint32_t ip6_un1_flow;  /* 20 bits of flow-ID */
+            uint16_t ip6_un1_plen;  /* payload length */
+            uint8_t  ip6_un1_nxt;   /* next header */
+            uint8_t  ip6_un1_hlim;  /* hop limit */
+        } ip6_un1;
+        uint8_t ip6_un2_vfc;    /* 4 bits version, top 4 bits class */
+    } ip6_ctlun;
+    
+    struct in6_addr
+    {
+        uint8_t s6_addr[16];
+    }ip6_src, ip6_dst;
+    
+    struct SRHC_payload
+    {
+        uint8_t s6_payload[64]; 
+    } payload;
+} ip6_buffer;
+
 typedef struct lowpan
 {
     uint8_t  tf;
@@ -51,7 +78,7 @@ typedef struct lowpan
     uint8_t  cid;
     struct lowpan_addr1
     {
-      uint8_t slowpan_addr[16]; 	
+      uint8_t slowpan_addr[16];     
     } src;
     struct lowpan_addr2
     {
@@ -59,7 +86,7 @@ typedef struct lowpan
     } dst;
     struct lowpan_payload
     {
-      uint8_t slowpan_payload[25];  // 27 header --- max 52 LoRa payload
+      uint8_t slowpan_payload[64];  // 27 header --- max 52 LoRa payload
     }payload;
 }lowpan_header;
 
@@ -74,11 +101,10 @@ typedef struct RoHC
     uint8_t m:1;
     uint8_t dac:1;
     uint8_t dam:2;  
-
-    uint8_t returnValue[52];
 } RoHC_base;
 
 
-RoHC_base *IPv6ToMesh(char *);
+char *IPv6ToMesh(char *, int);
 
-int init_tun();
+char *IPv6Rx(char *, int, int);
+

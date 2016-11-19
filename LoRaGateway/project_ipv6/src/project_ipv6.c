@@ -36,7 +36,8 @@ Maintainer: Sylvain Miermont
 #include "loragw_hal.h"
 #include "loragw_aux.h"
 
-#include "IPv6.h"
+#include "LoWPAN_HC.h"
+#include "tun_tap.h"
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
@@ -118,7 +119,7 @@ static void sig_handler(int sigio) {
 }
 
 
-void printbitssimple(RoHC_base *n) 
+/*void printbitssimple(RoHC_base *n) 
 {
     int j;
     uint8_t  i;
@@ -137,7 +138,7 @@ void printbitssimple(RoHC_base *n)
         printf("\n");
     }
     
-}
+}*/
 /* describe command line options */
 
 /* -------------------------------------------------------------------------- */
@@ -147,7 +148,7 @@ int main()
 {
 
     char buffer[1500];
-    int tun_fd = 0;
+    int tun_fd = 0,nread=0;
 
 
     int i;
@@ -320,11 +321,11 @@ int main()
 
     cycle_count = 0;
     while ((repeat == -1) || (cycle_count < repeat)) {
-       read(tun_fd,buffer,sizeof(buffer));
-       if(IPv6ToMesh(buffer) != NULL)
+       nread = read(tun_fd,buffer,sizeof(buffer));
+       if(IPv6ToMesh(buffer,nread) != NULL)
        {
 
-            printbitssimple(IPv6ToMesh(buffer));
+            //printbitssimple(IPv6ToMesh(buffer));
             ++cycle_count;
 
             /* send packet */
