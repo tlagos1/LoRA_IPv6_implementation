@@ -27,7 +27,9 @@ OBJDIR = obj
 
 LGW_INC = $(LGW_PATH)/inc/config.h
 LGW_INC += $(LGW_PATH)/inc/loragw_hal.h
-LGW_INC += $(LGW_IPV6_PATH)/inc/LoRaMacCrypto.h
+LGW_INC += $(LGW_IPV6_PATH)/inc/LoWPAN_HC.h
+LGW_INC += $(LGW_IPV6_PATH)/inc/tun_tap.h
+
 
 ### Linking options
 
@@ -46,7 +48,6 @@ clean:
 $(LGW_PATH)/inc/config.h:
 	@if test ! -f $@; then \
 	$(MAKE) all -C $(LGW_PATH); \
-	$(MAKE) all -C $(LGW_IPV6_PATH); \
 	fi
 
 $(LGW_PATH)/libloragw.a: $(LGW_INC)
@@ -54,18 +55,20 @@ $(LGW_PATH)/libloragw.a: $(LGW_INC)
 	$(MAKE) all -C $(LGW_PATH); \
 	fi
 
-
 ### Sub-modules compilation
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
+$(OBJDIR)/parson.o: src/parson.c inc/parson.h | $(OBJDIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+
 ### Main program compilation and assembly
 
-$(OBJDIR)/$(APP_NAME).o: src/$(APP_NAME).c | $(OBJDIR)
+$(OBJDIR)/$(APP_NAME).o: src/$(APP_NAME).c $(LGW_INC) inc/parson.h | $(OBJDIR)
 	$(CC) -c $(CFLAGS) -I$(LGW_PATH)/inc -I$(LGW_IPV6_PATH)/inc $< -o $@
 
-$(APP_NAME): $(OBJDIR)/$(APP_NAME).o $(LGW_PATH)/libloragw.a $(LGW_IPV6_PATH)/libstack_ipv6.a 
-	$(CC) -L$(LGW_PATH) -L$(LGW_IPV6_PATH) $<  -o $@ $(LIBS)
+$(APP_NAME): $(OBJDIR)/$(APP_NAME).o $(LGW_PATH)/libloragw.a $(LGW_IPV6_PATH)/libstack_ipv6.a $(OBJDIR)/parson.o
+	$(CC) -L$(LGW_PATH) -L$(LGW_IPV6_PATH) $< $(OBJDIR)/parson.o -o $@ $(LIBS)
 
 ### EOF

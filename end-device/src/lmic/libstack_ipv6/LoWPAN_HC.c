@@ -1,14 +1,20 @@
 
 /*Edited by Tomás Lagos*/
 
+#define _BSD_SOURCE
+
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <stdint.h>
+#include <stdio.h>
 
 #include "LoWPAN_HC.h"
 #include "IPv6_checksum.h"
+
+RoHC_base *HRbase = NULL;
+ip6_buffer *decode = NULL;
 
 char *reassemble_lowpan(lowpan_header *lowpan, int payload_lenght, char *buffer)
 {
@@ -144,7 +150,6 @@ char *reassemble_lowpan(lowpan_header *lowpan, int payload_lenght, char *buffer)
         return buffer;    
     }
 }
-
 char *IPv6ToMesh(char *buffer, int lenght_buffer, lowpan_header *lowpanh)
 {
     ip6_buffer *iph = (ip6_buffer *)buffer;
@@ -185,12 +190,16 @@ char *IPv6ToMesh(char *buffer, int lenght_buffer, lowpan_header *lowpanh)
 }
 
 
-ip6_buffer *DecodeIPv6(char *buffer, int lenght_buffer ,ip6_buffer *decIPv6)
+
+ip6_buffer *DecodeIPv6(char *buffer, int lenght_buffer)
 {
     int i,j,k;
-
-    RoHC_base *HRbase = (RoHC_base *)malloc(sizeof(RoHC_base));
-
+    
+    if(decode == NULL)
+    {
+        decode = (ip6_buffer *) malloc(sizeof(ip6_buffer));
+        HRbase = (RoHC_base *)malloc(8*sizeof(RoHC_base));
+    }
     HRbase->tfn= (buffer[0] >> 3) & 3;
     HRbase->nh = (buffer[0] >> 2) & 1; 
     HRbase->hlim = buffer[0] & 3; 
@@ -201,127 +210,135 @@ ip6_buffer *DecodeIPv6(char *buffer, int lenght_buffer ,ip6_buffer *decIPv6)
     HRbase->dac = (buffer[1] >> 2) & 1;
     HRbase->dam = buffer[1] & 3;
 
-    decIPv6->ip6_ctlun.ip6_un1.ip6_un1_flow = 0x60;
+
+    decode->ip6_ctlun.ip6_un1.ip6_un1_flow = 0x60;
     if(HRbase->tfn == 3)
     {
         j = 2;
     }
+
     if(HRbase->nh == 0)
     {
-        decIPv6->ip6_ctlun.ip6_un1.ip6_un1_nxt =buffer[2] ;
+        decode->ip6_ctlun.ip6_un1.ip6_un1_nxt =buffer[2] ;
         j++;
     }
+
     if(HRbase->hlim == 2)
     {
-        decIPv6->ip6_ctlun.ip6_un1.ip6_un1_hlim = 64;
+        decode->ip6_ctlun.ip6_un1.ip6_un1_hlim = 64;
     }
+
     if(HRbase->cid == 1)
     {
        j += 8;
     }
+
     if(HRbase->sam == 0)
     {
         if(HRbase->sac == 0)
         {
             k = j;
-            memcpy(decIPv6->ip6_src.s6_addr,&buffer[k],16);
+            memcpy(decode->ip6_src.s6_addr,&buffer[k],16);
             j += 16;
         }
     }
+
     if(HRbase->m == 0 && HRbase->dac == 0)
     {
         if(HRbase->dam == 1)
         {
             k = j;
-            decIPv6->ip6_dst.s6_addr[0] = 0xbb;
-            decIPv6->ip6_dst.s6_addr[1] = 0xbb;
+            decode->ip6_dst.s6_addr[0] = 0xbb;
+            decode->ip6_dst.s6_addr[1] = 0xbb;
 
             for(i = 2; i < 8; i++)
             {
-                decIPv6->ip6_dst.s6_addr[i] = 0;
+                decode->ip6_dst.s6_addr[i] = 0;
             }
             for (i = 0; i < 8; i++)
             {
-                decIPv6->ip6_dst.s6_addr[i+8] = buffer[i+k];
+                decode->ip6_dst.s6_addr[i+8] = buffer[i+k];
                 j++;
             }    
         }
     }
+
     k=j;
 
-    decIPv6->ip6_ctlun.ip6_un1.ip6_un1_plen = 0 ;
-    decIPv6->ip6_ctlun.ip6_un1.ip6_un1_plen |= (lenght_buffer - k) << 8 ;
+    decode->ip6_ctlun.ip6_un1.ip6_un1_plen = 0 ;
+    decode->ip6_ctlun.ip6_un1.ip6_un1_plen |= 18 << 8 ;
 
-    memcpy(decIPv6->payload.s6_payload,&buffer[k],decIPv6->ip6_ctlun.ip6_un1.ip6_un1_plen);
-   
-    free(HRbase);
-    return decIPv6;
+    
+    memcpy(decode->payload.s6_payload,&buffer[k],(decode->ip6_ctlun.ip6_un1.ip6_un1_plen >> 8));
+    
+    return decode;
 }
 
 
-char *IPv6Rx(char *buffer, int lenght_buffer, int tun_fd, ip6_buffer *decode)
+char *IPv6Rx(char *buffer, int lenght_buffer, int tun_fd, ip6_buffer *dec)
 {
-    int j = 0; 
+    int i,j = 0; 
+    uint16_t gen_checksum = 0;
     char buffer_decoded[1500];
-    uint16_t gen_checksum;
-    char *ptr;
     uint16_t payload_len;
-    ip6_buffer *auxRX;
+    char *ptr;
+    ip6_buffer *auxRX = (ip6_buffer *)malloc(sizeof(ip6_buffer));
 
-    ptr = &buffer_decoded[0];
+    ptr = &buffer[0];
+    
+    dec = DecodeIPv6(buffer, lenght_buffer);
+    
 
-    decode = DecodeIPv6(buffer, lenght_buffer, decode);
-        
-    if(decode->ip6_ctlun.ip6_un1.ip6_un1_nxt == 58)
+    if(dec->ip6_ctlun.ip6_un1.ip6_un1_nxt == 58)
     {
-        if(decode->payload.s6_payload[0] == 0x80)
+        if(dec->payload.s6_payload[0] == 0x80)
         {
-            decode->payload.s6_payload[0] = 0x81;
-            auxRX = decode;
-            decode->ip6_src = decode->ip6_dst;
-            decode->ip6_dst = auxRX->ip6_src; 
+            dec->payload.s6_payload[0] = 0x81;
+            auxRX->ip6_src = dec->ip6_src;
+            dec->ip6_src = dec->ip6_dst;
+            dec->ip6_dst = auxRX->ip6_src;
+            
+            
+            memcpy(&ptr[0], &dec->ip6_ctlun.ip6_un1.ip6_un1_flow, sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_flow));
+            ptr += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_flow);  
+            j += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_flow); 
 
-            memcpy(ptr, &decode->ip6_ctlun.ip6_un1.ip6_un1_flow, sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_flow));
-            ptr += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_flow);  
-            j += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_flow);  
+            payload_len = dec->ip6_ctlun.ip6_un1.ip6_un1_plen >> 8 & 255;
+            memcpy(ptr, &dec->ip6_ctlun.ip6_un1.ip6_un1_plen, sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_plen));
+            ptr += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_plen);  
+            j += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_plen);
 
-            payload_len = decode->ip6_ctlun.ip6_un1.ip6_un1_plen >> 8 & 255;
-            memcpy(ptr, &decode->ip6_ctlun.ip6_un1.ip6_un1_plen, sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_plen));
-            ptr += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_plen);  
-            j += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_plen);
+            memcpy(ptr, &dec->ip6_ctlun.ip6_un1.ip6_un1_nxt, sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_nxt));
+            ptr += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_nxt);  
+            j += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_nxt);
 
-            memcpy(ptr, &decode->ip6_ctlun.ip6_un1.ip6_un1_nxt, sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_nxt));
-            ptr += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_nxt);  
-            j += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_nxt);
+            memcpy(ptr, &dec->ip6_ctlun.ip6_un1.ip6_un1_hlim, sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_hlim));
+            ptr += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_hlim);  
+            j += sizeof (dec->ip6_ctlun.ip6_un1.ip6_un1_hlim);  
+                    
+            memcpy(ptr, &dec->ip6_src.s6_addr, sizeof (dec->ip6_src.s6_addr));
+            ptr += sizeof (dec->ip6_src.s6_addr);
+            j += sizeof (dec->ip6_src.s6_addr);   
 
-            memcpy(ptr, &decode->ip6_ctlun.ip6_un1.ip6_un1_hlim, sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_hlim));
-            ptr += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_hlim);  
-            j += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_hlim);
+            memcpy(ptr, &dec->ip6_dst.s6_addr, sizeof (dec->ip6_dst.s6_addr));
+            ptr += sizeof (dec->ip6_dst.s6_addr);
+            j += sizeof (dec->ip6_dst.s6_addr);  
 
-            memcpy(ptr, &decode->ip6_src.s6_addr, sizeof (decode->ip6_src.s6_addr));
-            ptr += sizeof (decode->ip6_src.s6_addr);
-            j += sizeof (decode->ip6_src.s6_addr);    
-
-            memcpy(ptr, &decode->ip6_dst.s6_addr, payload_len);
-            ptr += sizeof (decode->ip6_dst.s6_addr);
-            j += sizeof (decode->ip6_dst.s6_addr);
-
-            memcpy(ptr, &decode->payload.s6_payload, sizeof(decode->payload.s6_payload));
+            memcpy(ptr, &dec->payload.s6_payload, payload_len);
             ptr += payload_len;
             j += payload_len; 
 
-            gen_checksum = checksum_icmpv6(buffer_decoded,(j));
-            buffer_decoded[42] = (gen_checksum >> 8) & 255;
-            buffer_decoded[43] = (gen_checksum) & 255;
-
-            memcpy(buffer,&buffer_decoded[0],j);
+            gen_checksum = checksum_icmpv6(buffer,(j));
+            buffer[42] = (gen_checksum >> 8) & 255;
+            buffer[43] = (gen_checksum) & 255;
             
+            free(auxRX);
             return buffer;
 
         }
         else
         {
-            memcpy(ptr, &decode->ip6_ctlun.ip6_un1.ip6_un1_flow, sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_flow));
+             memcpy(ptr, &decode->ip6_ctlun.ip6_un1.ip6_un1_flow, sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_flow));
             ptr += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_flow);  
             j += sizeof (decode->ip6_ctlun.ip6_un1.ip6_un1_flow);  
 
@@ -350,9 +367,8 @@ char *IPv6Rx(char *buffer, int lenght_buffer, int tun_fd, ip6_buffer *decode)
             ptr += payload_len;
             j += payload_len; 
 
-            write(tun_fd, buffer_decoded, (decode->ip6_ctlun.ip6_un1.ip6_un1_plen + 40));
+            //write(tun_fd, buffer_decoded, (decode->ip6_ctlun.ip6_un1.ip6_un1_plen + 40));
         }    
     }
     return NULL;
 }
-

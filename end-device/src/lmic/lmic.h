@@ -317,4 +317,6 @@ DECL_ON_LMIC_EVENT;
 } // extern "C"
 #endif
 
+
+
 #endif // _lmic_h_

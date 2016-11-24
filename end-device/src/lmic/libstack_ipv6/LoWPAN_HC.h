@@ -1,4 +1,3 @@
-
 /*Edited by Tomás Lagos*/
 
 #define IPv6_HEADER_LEN            40
@@ -106,6 +105,6 @@ typedef struct RoHC
 } RoHC_base;
 
 
-char *IPv6ToMesh(char *, int, lowpan_header *);
+char *IPv6ToMesh(char *, int,lowpan_header *);
  
-char *IPv6Rx(char *, int, int, ip6_buffer *);
+char *IPv6Rx(char *, int, int,ip6_buffer *);

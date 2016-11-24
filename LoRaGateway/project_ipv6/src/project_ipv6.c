@@ -5,13 +5,14 @@
  _____) ) ____| | | || |_| ____( (___| | | |
 (______/|_____)_|_|_| \__)_____)\____)_| |_|
   (C)2013 Semtech-Cycleo
+
 Description:
-    Send a bunch of packets on a settable frequency
+    Configure LoRa concentrator and record received packets in a log file
+
 License: Revised BSD License, see LICENSE.TXT file include in the project
 Maintainer: Sylvain Miermont
 */
 
-/*Edited by Tomás Lagos*/
 
 /* -------------------------------------------------------------------------- */
 /* --- DEPENDANCIES --------------------------------------------------------- */
@@ -29,24 +30,21 @@ Maintainer: Sylvain Miermont
 
 #include <string.h>     /* memset */
 #include <signal.h>     /* sigaction */
+#include <time.h>       /* time clock_gettime strftime gmtime clock_nanosleep*/
 #include <unistd.h>     /* getopt access */
-#include <stdlib.h>     /* exit codes */
-#include <getopt.h>     /* getopt_long */
+#include <stdlib.h>     /* atoi */
 
 #include "loragw_hal.h"
-#include "loragw_aux.h"
-
 #include "LoWPAN_HC.h"
 #include "tun_tap.h"
+#include "parson.h"
+
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-#define MSG(args...) fprintf(stderr, args) /* message that is destined to the user */
-
-/* -------------------------------------------------------------------------- */
-/* --- PRIVATE CONSTANTS ---------------------------------------------------- */
+#define ARRAY_SIZE(a)   (sizeof(a) / sizeof((a)[0]))
+#define MSG(args...)    fprintf(stderr,"loragw_pkt_logger: " args) /* message that is destined to the user */
 
 #define TX_RF_CHAIN          0    /* TX only supported on radio A */
 #define DEFAULT_RSSI_OFFSET  0.0
@@ -54,212 +52,350 @@ Maintainer: Sylvain Miermont
 #define DEFAULT_BR_KBPS      50
 #define DEFAULT_FDEV_KHZ     25
 
+
+
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE VARIABLES (GLOBAL) ------------------------------------------- */
 
 /* signal handling variables */
 struct sigaction sigact; /* SIGQUIT&SIGINT&SIGTERM signal handling */
 static int exit_sig = 0; /* 1 -> application terminates cleanly (shut down hardware, close open files, etc) */
-static int quit_sig = 0; /* 1 -> application terminates without shutting down the hardware */
 
-/* TX gain LUT table */
-static struct lgw_tx_gain_lut_s txgain_lut = {
-    .size = 5,
-    .lut[0] = {
-        .dig_gain = 0,
-        .pa_gain = 0,
-        .dac_gain = 3,
-        .mix_gain = 12,
-        .rf_power = 0
-    },
-    .lut[1] = {
-        .dig_gain = 0,
-        .pa_gain = 1,
-        .dac_gain = 3,
-        .mix_gain = 12,
-        .rf_power = 10
-    },
-    .lut[2] = {
-        .dig_gain = 0,
-        .pa_gain = 2,
-        .dac_gain = 3,
-        .mix_gain = 10,
-        .rf_power = 14
-    },
-    .lut[3] = {
-        .dig_gain = 0,
-        .pa_gain = 3,
-        .dac_gain = 3,
-        .mix_gain = 9,
-        .rf_power = 20
-    },
-    .lut[4] = {
-        .dig_gain = 0,
-        .pa_gain = 3,
-        .dac_gain = 3,
-        .mix_gain = 14,
-        .rf_power = 27
-    }};
+/* configuration variables needed by the application  */
+uint64_t lgwm = 0; /* LoRa gateway MAC address */
+char lgwm_str[17];
+
+
+/* clock and log file management */
+time_t now_time;
+time_t log_start_time;
+FILE * log_file = NULL;
+char log_file_name[64];
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS DECLARATION ---------------------------------------- */
 
-static void sig_handler(int sigio);
+int parse_SX1301_configuration();
 
+int parse_gateway_configuration(const char * conf_file);
+
+void open_log(void);
+
+void usage (void);
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS DEFINITION ----------------------------------------- */
 
-static void sig_handler(int sigio) {
-    if (sigio == SIGQUIT) {
-        quit_sig = 1;;
-    } else if ((sigio == SIGINT) || (sigio == SIGTERM)) {
-        exit_sig = 1;
+
+int parse_SX1301_configuration(const char * conf_file) {
+    int i;
+    const char conf_obj[] = "SX1301_conf";
+    char param_name[32]; /* used to generate variable parameter names */
+    const char *str; /* used to store string value from JSON object */
+    struct lgw_conf_board_s boardconf;
+    struct lgw_conf_rxrf_s rfconf;
+    struct lgw_conf_rxif_s ifconf;
+    JSON_Value *root_val;
+    JSON_Object *root = NULL;
+    JSON_Object *conf = NULL;
+    JSON_Value *val;
+    uint32_t sf, bw;
+
+    /* try to parse JSON */
+    root_val = json_parse_file_with_comments(conf_file);
+    root = json_value_get_object(root_val);
+    if (root == NULL) {
+        MSG("ERROR: %s id not a valid JSON file\n", conf_file);
+        exit(EXIT_FAILURE);
     }
+    conf = json_object_get_object(root, conf_obj);
+    if (conf == NULL) {
+        MSG("INFO: %s does not contain a JSON object named %s\n", conf_file, conf_obj);
+        return -1;
+    } else {
+        MSG("INFO: %s does contain a JSON object named %s, parsing SX1301 parameters\n", conf_file, conf_obj);
+    }
+
+    /* set board configuration */
+    memset(&boardconf, 0, sizeof boardconf); /* initialize configuration structure */
+    val = json_object_get_value(conf, "lorawan_public"); /* fetch value (if possible) */
+    if (json_value_get_type(val) == JSONBoolean) {
+        boardconf.lorawan_public = (bool)json_value_get_boolean(val);
+        if(boardconf.lorawan_public == true)
+        {
+            printf("%s\n", "true");
+        }
+    } else {
+        MSG("WARNING: Data type for lorawan_public seems wrong, please check\n");
+        boardconf.lorawan_public = false;
+    }
+    val = json_object_get_value(conf, "clksrc"); /* fetch value (if possible) */
+    if (json_value_get_type(val) == JSONNumber) {
+        boardconf.clksrc = (uint8_t)json_value_get_number(val);
+        printf("%i\n", boardconf.clksrc);
+    } else {
+        MSG("WARNING: Data type for clksrc seems wrong, please check\n");
+        boardconf.clksrc = 0;
+    }
+    MSG("INFO: lorawan_public %d, clksrc %d\n", boardconf.lorawan_public, boardconf.clksrc);
+    /* all parameters parsed, submitting configuration to the HAL */
+        if (lgw_board_setconf(boardconf) != LGW_HAL_SUCCESS) {
+                MSG("WARNING: Failed to configure board\n");
+    }
+
+    /* set configuration for RF chains */
+    for (i = 0; i < LGW_RF_CHAIN_NB; ++i) {
+        memset(&rfconf, 0, sizeof(rfconf)); /* initialize configuration structure */
+        sprintf(param_name, "radio_%i", i); /* compose parameter path inside JSON structure */
+        val = json_object_get_value(conf, param_name); /* fetch value (if possible) */
+        if (json_value_get_type(val) != JSONObject) {
+            MSG("INFO: no configuration for radio %i\n", i);
+            continue;
+        }
+        /* there is an object to configure that radio, let's parse it */
+        sprintf(param_name, "radio_%i.enable", i);
+        val = json_object_dotget_value(conf, param_name);
+        if (json_value_get_type(val) == JSONBoolean) {
+            rfconf.enable = (bool)json_value_get_boolean(val);
+        } else {
+            rfconf.enable = false;
+        }
+        if (rfconf.enable == false) { /* radio disabled, nothing else to parse */
+            MSG("INFO: radio %i disabled\n", i);
+        } else  { /* radio enabled, will parse the other parameters */
+            snprintf(param_name, sizeof param_name, "radio_%i.freq", i);
+            rfconf.freq_hz = (uint32_t)json_object_dotget_number(conf, param_name);
+            snprintf(param_name, sizeof param_name, "radio_%i.rssi_offset", i);
+            rfconf.rssi_offset = (float)json_object_dotget_number(conf, param_name);
+            snprintf(param_name, sizeof param_name, "radio_%i.type", i);
+            str = json_object_dotget_string(conf, param_name);
+            if (!strncmp(str, "SX1255", 6)) {
+                rfconf.type = LGW_RADIO_TYPE_SX1255;
+            } else if (!strncmp(str, "SX1257", 6)) {
+                rfconf.type = LGW_RADIO_TYPE_SX1257;
+            } else {
+                MSG("WARNING: invalid radio type: %s (should be SX1255 or SX1257)\n", str);
+            }
+            snprintf(param_name, sizeof param_name, "radio_%i.tx_enable", i);
+            val = json_object_dotget_value(conf, param_name);
+            if (json_value_get_type(val) == JSONBoolean) {
+                rfconf.tx_enable = (bool)json_value_get_boolean(val);
+            } else {
+                rfconf.tx_enable = false;
+            }
+            MSG("INFO: radio %i enabled (type %s), center frequency %u, RSSI offset %f, tx enabled %d\n", i, str, rfconf.freq_hz, rfconf.rssi_offset, rfconf.tx_enable);
+        }
+        /* all parameters parsed, submitting configuration to the HAL */
+        if (lgw_rxrf_setconf(i, rfconf) != LGW_HAL_SUCCESS) {
+            MSG("WARNING: invalid configuration for radio %i\n", i);
+        }
+    }
+
+    /* set configuration for LoRa multi-SF channels (bandwidth cannot be set) */
+    for (i = 0; i < LGW_MULTI_NB; ++i) {
+        memset(&ifconf, 0, sizeof(ifconf)); /* initialize configuration structure */
+        sprintf(param_name, "chan_multiSF_%i", i); /* compose parameter path inside JSON structure */
+        val = json_object_get_value(conf, param_name); /* fetch value (if possible) */
+        if (json_value_get_type(val) != JSONObject) {
+            MSG("INFO: no configuration for LoRa multi-SF channel %i\n", i);
+            continue;
+        }
+        /* there is an object to configure that LoRa multi-SF channel, let's parse it */
+        sprintf(param_name, "chan_multiSF_%i.enable", i);
+        val = json_object_dotget_value(conf, param_name);
+        if (json_value_get_type(val) == JSONBoolean) {
+            ifconf.enable = (bool)json_value_get_boolean(val);
+        } else {
+            ifconf.enable = false;
+        }
+        if (ifconf.enable == false) { /* LoRa multi-SF channel disabled, nothing else to parse */
+            MSG("INFO: LoRa multi-SF channel %i disabled\n", i);
+        } else  { /* LoRa multi-SF channel enabled, will parse the other parameters */
+            sprintf(param_name, "chan_multiSF_%i.radio", i);
+            ifconf.rf_chain = (uint32_t)json_object_dotget_number(conf, param_name);
+            sprintf(param_name, "chan_multiSF_%i.if", i);
+            ifconf.freq_hz = (int32_t)json_object_dotget_number(conf, param_name);
+            // TODO: handle individual SF enabling and disabling (spread_factor)
+            MSG("INFO: LoRa multi-SF channel %i enabled, radio %i selected, IF %i Hz, 125 kHz bandwidth, SF 7 to 12\n", i, ifconf.rf_chain, ifconf.freq_hz);
+        }
+        /* all parameters parsed, submitting configuration to the HAL */
+        if (lgw_rxif_setconf(i, ifconf) != LGW_HAL_SUCCESS) {
+            MSG("WARNING: invalid configuration for LoRa multi-SF channel %i\n", i);
+        }
+    }
+
+    /* set configuration for LoRa standard channel */
+    memset(&ifconf, 0, sizeof(ifconf)); /* initialize configuration structure */
+    val = json_object_get_value(conf, "chan_Lora_std"); /* fetch value (if possible) */
+    if (json_value_get_type(val) != JSONObject) {
+        MSG("INFO: no configuration for LoRa standard channel\n");
+    } else {
+        val = json_object_dotget_value(conf, "chan_Lora_std.enable");
+        if (json_value_get_type(val) == JSONBoolean) {
+            ifconf.enable = (bool)json_value_get_boolean(val);
+        } else {
+            ifconf.enable = false;
+        }
+        if (ifconf.enable == false) {
+            MSG("INFO: LoRa standard channel %i disabled\n", i);
+        } else  {
+            ifconf.rf_chain = (uint32_t)json_object_dotget_number(conf, "chan_Lora_std.radio");
+            ifconf.freq_hz = (int32_t)json_object_dotget_number(conf, "chan_Lora_std.if");
+            bw = (uint32_t)json_object_dotget_number(conf, "chan_Lora_std.bandwidth");
+            switch(bw) {
+                case 500000: ifconf.bandwidth = BW_500KHZ; break;
+                case 250000: ifconf.bandwidth = BW_250KHZ; break;
+                case 125000: ifconf.bandwidth = BW_125KHZ; break;
+                default: ifconf.bandwidth = BW_UNDEFINED;
+            }
+            sf = (uint32_t)json_object_dotget_number(conf, "chan_Lora_std.spread_factor");
+            switch(sf) {
+                case  7: ifconf.datarate = DR_LORA_SF7;  break;
+                case  8: ifconf.datarate = DR_LORA_SF8;  break;
+                case  9: ifconf.datarate = DR_LORA_SF9;  break;
+                case 10: ifconf.datarate = DR_LORA_SF10; break;
+                case 11: ifconf.datarate = DR_LORA_SF11; break;
+                case 12: ifconf.datarate = DR_LORA_SF12; break;
+                default: ifconf.datarate = DR_UNDEFINED;
+            }
+            MSG("INFO: LoRa standard channel enabled, radio %i selected, IF %i Hz, %u Hz bandwidth, SF %u\n", ifconf.rf_chain, ifconf.freq_hz, bw, sf);
+        }
+        if (lgw_rxif_setconf(8, ifconf) != LGW_HAL_SUCCESS) {
+            MSG("WARNING: invalid configuration for LoRa standard channel\n");
+        }
+    }
+
+    /* set configuration for FSK channel */
+    memset(&ifconf, 0, sizeof(ifconf)); /* initialize configuration structure */
+    val = json_object_get_value(conf, "chan_FSK"); /* fetch value (if possible) */
+    if (json_value_get_type(val) != JSONObject) {
+        MSG("INFO: no configuration for FSK channel\n");
+    } else {
+        val = json_object_dotget_value(conf, "chan_FSK.enable");
+        if (json_value_get_type(val) == JSONBoolean) {
+            ifconf.enable = (bool)json_value_get_boolean(val);
+        } else {
+            ifconf.enable = false;
+        }
+        if (ifconf.enable == false) {
+            MSG("INFO: FSK channel %i disabled\n", i);
+        } else  {
+            ifconf.rf_chain = (uint32_t)json_object_dotget_number(conf, "chan_FSK.radio");
+            ifconf.freq_hz = (int32_t)json_object_dotget_number(conf, "chan_FSK.if");
+            bw = (uint32_t)json_object_dotget_number(conf, "chan_FSK.bandwidth");
+            if      (bw <= 7800)   ifconf.bandwidth = BW_7K8HZ;
+            else if (bw <= 15600)  ifconf.bandwidth = BW_15K6HZ;
+            else if (bw <= 31200)  ifconf.bandwidth = BW_31K2HZ;
+            else if (bw <= 62500)  ifconf.bandwidth = BW_62K5HZ;
+            else if (bw <= 125000) ifconf.bandwidth = BW_125KHZ;
+            else if (bw <= 250000) ifconf.bandwidth = BW_250KHZ;
+            else if (bw <= 500000) ifconf.bandwidth = BW_500KHZ;
+            else ifconf.bandwidth = BW_UNDEFINED;
+            ifconf.datarate = (uint32_t)json_object_dotget_number(conf, "chan_FSK.datarate");
+            MSG("INFO: FSK channel enabled, radio %i selected, IF %i Hz, %u Hz bandwidth, %u bps datarate\n", ifconf.rf_chain, ifconf.freq_hz, bw, ifconf.datarate);
+        }
+        if (lgw_rxif_setconf(9, ifconf) != LGW_HAL_SUCCESS) {
+            MSG("WARNING: invalid configuration for FSK channel\n");
+        }
+    }
+    json_value_free(root_val);
+    return 0;
 }
 
+int parse_gateway_configuration(const char * conf_file) {
+    const char conf_obj[] = "gateway_conf";
+    JSON_Value *root_val;
+    JSON_Object *root = NULL;
+    JSON_Object *conf = NULL;
+    const char *str; /* pointer to sub-strings in the JSON data */
+    unsigned long long ull = 0;
 
-/*void printbitssimple(RoHC_base *n) 
-{
-    int j;
-    uint8_t  i;
-
-    for(j = 0;j < sizeof(n->returnValue);j++)
-    {
-        i = 1<<7;
-        while (i > 0) 
-        {
-            if (n->returnValue[j] & i)
-                printf("1");
-            else
-                printf("0");
-            i >>= 1;
-        }
-        printf("\n");
+    /* try to parse JSON */
+    root_val = json_parse_file_with_comments(conf_file);
+    root = json_value_get_object(root_val);
+    if (root == NULL) {
+        MSG("ERROR: %s id not a valid JSON file\n", conf_file);
+        exit(EXIT_FAILURE);
     }
-    
-}*/
-/* describe command line options */
+    conf = json_object_get_object(root, conf_obj);
+    if (conf == NULL) {
+        MSG("INFO: %s does not contain a JSON object named %s\n", conf_file, conf_obj);
+        return -1;
+    } else {
+        MSG("INFO: %s does contain a JSON object named %s, parsing gateway parameters\n", conf_file, conf_obj);
+    }
+
+    /* getting network parameters (only those necessary for the packet logger) */
+    str = json_object_get_string(conf, "gateway_ID");
+    if (str != NULL) {
+        sscanf(str, "%llx", &ull);
+        lgwm = ull;
+        MSG("INFO: gateway MAC address is configured to %016llX\n", ull);
+    }
+
+    json_value_free(root_val);
+    return 0;
+}
+
 
 /* -------------------------------------------------------------------------- */
 /* --- MAIN FUNCTION -------------------------------------------------------- */
 
 int main()
 {
-
-    char buffer[1500];
-    int tun_fd = 0,nread=0;
-
-
-    int i;
-    uint8_t status_var;
-
-    /* user entry parameters */
-
-    /* application parameters */
+    int i, j; /* loop and temporary variables */
+    int delay = 4000;
+    struct lgw_pkt_tx_s txpkt;
+    uint32_t f_target = 868000000;
+    int pow = 14;
     char mod[64] = DEFAULT_MODULATION;
-    uint32_t f_target = 869525000; /* target frequency - invalid default value, has to be specified by user */
-    int sf = 10; /* SF10 by default */
-    int cr = 1; /* CR1 aka 4/5 by default */
-    int bw = 125; /* 125kHz bandwidth by default */
-    int pow = 14; /* 14 dBm by default */
-    int preamb = 8; /* 8 symbol preamble by default */
-    int pl_size = 52; /* 16 bytes payload by default */
-    int delay = 1000; /* 1 second between packets by default */
-    int repeat = -1; /* by default, repeat until stopped */
+    int bw = 125;
+    int sf = 7;
+    int cr = 1;
     bool invert = false;
+    int preamb = 8;
+    int pl_size = 52;
     float br_kbps = DEFAULT_BR_KBPS;
     uint8_t fdev_khz = DEFAULT_FDEV_KHZ;
-    bool lbt_enable = false;
-    uint32_t lbt_f_target = 0;
-    uint32_t lbt_tx_max_time = 4000000;
-    uint32_t lbt_sc_time = 5000;
-    uint8_t  lbt_rssi_target = 160;
-    uint8_t  lbt_nb_channel = 1;
 
-    /* RF configuration (TX fail if RF chain is not enabled) */
-    enum lgw_radio_type_e radio_type =  LGW_RADIO_TYPE_SX1257;
-    uint8_t clocksource = 1; /* Radio B is source by default */
-    struct lgw_conf_board_s boardconf;
-    struct lgw_conf_lbt_s lbtconf;
-    struct lgw_conf_rxrf_s rfconf;
+    int tun_fd = 0;
+    char buffer[1500];
+    int nread=0;
+    char *RoHC_package;
 
-    /* allocate memory for packet sending */
-    struct lgw_pkt_tx_s txpkt; /* array containing 1 outbound packet + metadata */
-
-    /* loop variables (also use as counters in the packet payload) */
-    uint16_t cycle_count = 0;
-
-    tun_fd = init_tun();
-
-    /* parse command line options */
+    lowpan_header *lowpanh = (lowpan_header *)malloc(sizeof(lowpan_header));
+    ip6_buffer *decode = (ip6_buffer *)malloc(sizeof(ip6_buffer));
+    /* clock and log rotation management */
     
+    unsigned long pkt_in_log = 0; /* count the number of packet written in each log file */
 
-    /* Summary of packet parameters */
-    if (strcmp(mod, "FSK") == 0) {
-        printf("Sending %i FSK packets on %u Hz (FDev %u kHz, Bitrate %.2f, %i bytes payload, %i symbols preamble) at %i dBm, with %i ms between each\n", repeat, f_target, fdev_khz, br_kbps, pl_size, preamb, pow, delay);
-    } else {
-        printf("Sending %i LoRa packets on %u Hz (BW %i kHz, SF %i, CR %i, %i bytes payload, %i symbols preamble) at %i dBm, with %i ms between each\n", repeat, f_target, bw, sf, cr, pl_size, preamb, pow, delay);
-    }
+    const char global_conf_fname[] = "global_conf.json";
 
-    /* configure signal handling */
-    sigemptyset(&sigact.sa_mask);
-    sigact.sa_flags = 0;
-    sigact.sa_handler = sig_handler;
-    sigaction(SIGQUIT, &sigact, NULL);
-    sigaction(SIGINT, &sigact, NULL);
-    sigaction(SIGTERM, &sigact, NULL);
+    /* allocate memory for packet fetching and processing */
+    struct lgw_pkt_rx_s rxpkt[16]; /* array containing up to 16 inbound packets metadata */
+    struct lgw_pkt_rx_s *p; /* pointer on a RX packet */
+    int nb_pkt;
+
+    /* configuration files management */
+    
+    parse_SX1301_configuration(global_conf_fname);
+    //parse_gateway_configuration(global_conf_fname);
+        
 
     /* starting the concentrator */
-    /* board config */
-    memset(&boardconf, 0, sizeof(boardconf));
-    boardconf.lorawan_public = true;
-    boardconf.clksrc = clocksource;
-    lgw_board_setconf(boardconf);
-
-    /* LBT config */
-    if (lbt_enable) {
-        memset(&lbtconf, 0, sizeof(lbtconf));
-        lbtconf.enable = true;
-        lbtconf.rssi_target = lbt_rssi_target;
-        lbtconf.scan_time_us = lbt_sc_time;
-        lbtconf.nb_channel = lbt_nb_channel;
-        lbtconf.start_freq = lbt_f_target;
-        lbtconf.tx_delay_1ch_us = lbt_tx_max_time;
-        lbtconf.tx_delay_2ch_us = lbt_tx_max_time;
-        lgw_lbt_setconf(lbtconf);
-    }
-
-    /* RF config */
-    memset(&rfconf, 0, sizeof(rfconf));
-    rfconf.enable = true;
-    rfconf.freq_hz = f_target;
-    rfconf.rssi_offset = DEFAULT_RSSI_OFFSET;
-    rfconf.type = radio_type;
-    for (i = 0; i < LGW_RF_CHAIN_NB; i++) {
-        if (i == TX_RF_CHAIN) {
-            rfconf.tx_enable = true;
-        } else {
-            rfconf.tx_enable = false;
-        }
-        lgw_rxrf_setconf(i, rfconf);
-    }
-
-    /* TX gain config */
-    lgw_txgain_setconf(&txgain_lut);
-
-    /* Start concentrator */
     i = lgw_start();
     if (i == LGW_HAL_SUCCESS) {
-        MSG("INFO: concentrator started, packet can be sent\n");
+        MSG("INFO: concentrator started, packet can now be received\n");
     } else {
         MSG("ERROR: failed to start the concentrator\n");
         return EXIT_FAILURE;
     }
 
+    /* transform the MAC address into a string */
+    sprintf(lgwm_str, "%08X%08X", (uint32_t)(lgwm >> 32), (uint32_t)(lgwm & 0xFFFFFFFF));
 
+    /* opening log file and writing CSV header*/
 
-    /* fill-up payload and parameters */
     memset(&txpkt, 0, sizeof(txpkt));
     txpkt.freq_hz = f_target;
     txpkt.tx_mode = IMMEDIATE;
@@ -301,64 +437,72 @@ int main()
         }
     }
 
-    uint8_t lala[1];
-
-    lala[0] = 0x61;
-    lala[1] = 0xBB;
-
     txpkt.invert_pol = invert;
     txpkt.preamble = preamb;
     txpkt.size = pl_size;
-    int j;
 
-    for(j = 0; j < 2; j++ )
-    {
-        txpkt.payload[j] = lala[j];
-    }
+    tun_fd = init_tun();
 
-    
+    /* main loop */
+    while (true) {
+        /* fetch packets */
+        if(tun_fd != -1)
+        {
+            nread = read(tun_fd,buffer,sizeof(buffer));
+            RoHC_package = IPv6ToMesh(buffer,nread,lowpanh);
+            if(RoHC_package != NULL)
+            {
+                printf("%s\n","manda mensaje");
+                txpkt.size = (nread - 40) +27;
+                for(j = 0; j < txpkt.size; j++ )
+                {
+                    txpkt.payload[j] = RoHC_package[j];
+                    printf("%i-", RoHC_package[j]);
+                }
+                printf("\n");
+                i = lgw_send(txpkt);
 
+                wait_ms(delay);
 
-    cycle_count = 0;
-    while ((repeat == -1) || (cycle_count < repeat)) {
-       nread = read(tun_fd,buffer,sizeof(buffer));
-       if(IPv6ToMesh(buffer,nread) != NULL)
-       {
-
-            //printbitssimple(IPv6ToMesh(buffer));
-            ++cycle_count;
-
-            /* send packet */
-            printf("Sending packet number %u ...", cycle_count);
-
-            i = lgw_send(txpkt); /* non-blocking scheduling of TX packet */
-            if (i == LGW_HAL_ERROR) {
-                printf("ERROR\n");
-                return EXIT_FAILURE;
-            } else if (i == LGW_LBT_ISSUE ) {
-                printf("Failed: Not allowed (LBT)\n");
-            } else {
-                /* wait for packet to finish sending */
-                do {
-                    wait_ms(5);
-                    lgw_status(TX_STATUS, &status_var); /* get TX status */
-                } while (status_var != TX_FREE);
-                printf("OK\n");
+                nb_pkt = lgw_receive(ARRAY_SIZE(rxpkt), rxpkt);
+                /* log packets */
+                if(nb_pkt > 0)
+                {
+                    printf("%s\n","llego mensaje");
+                    p = &rxpkt[0];
+                    for(i = 0; i < p->size; i++)
+                    {
+                        printf("%i-", p->payload[i]);
+                    }
+                    printf("\n");
+                    if(p->status == STAT_CRC_OK)
+                    {
+                        IPv6Rx((char *)p->payload,p->size,tun_fd,decode);
+                    }
+                }
+                
             }
 
-            /* wait inter-packet delay */
-            wait_ms(delay);
-
-            /* exit loop on user signals */
-            if ((quit_sig == 1) || (exit_sig == 1)) {
-                break;
-            }
+             
         }
+
+        
     }
 
-    /* clean up before leaving */
-    lgw_stop();
+    if (exit_sig == 1) {
+        /* clean up before leaving */
+        i = lgw_stop();
+        if (i == LGW_HAL_SUCCESS) {
+            MSG("INFO: concentrator stopped successfully\n");
+        } else {
+            MSG("WARNING: failed to stop concentrator successfully\n");
+        }
+        fclose(log_file);
+        MSG("INFO: log file %s closed, %lu packet(s) recorded\n", log_file_name, pkt_in_log);
+    }
 
-    printf("Exiting LoRa concentrator TX test program\n");
+    MSG("INFO: Exiting packet logger program\n");
     return EXIT_SUCCESS;
 }
+
+/* --- EOF ------------------------------------------------------------------ */
