@@ -8,9 +8,11 @@ AR := $(CROSS_COMPILE)ar
 CFLAGS := -O2 -Wall -Wextra -std=c99 -Iinc -I.
 
 OBJDIR = obj
-OBJDIR_LoWPAN_HC = obj
+OBJDIR_LoWPAN_IPHC = obj
 OBJDIR_tun_tap = obj
-OBJDIR_IPv6_checksum = obj
+OBJDIR_IPv6 = obj
+OBJDIR_SCHC = obj
+OBJDIR_SDI12 = obj
 INCLUDES = $(wildcard inc/*.h)
 
 ### linking options
@@ -30,17 +32,22 @@ clean:
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
-$(OBJDIR_LoWPAN_HC)/%.o: src/LoWPAN_HC/%.c $(INCLUDES) | $(OBJDIR)
+$(OBJDIR_LoWPAN_IPHC)/%.o: src/LoWPAN_IPHC/%.c $(INCLUDES) | $(OBJDIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(OBJDIR_tun_tap)/%.o: src/tun_tap/%.c $(INCLUDES) | $(OBJDIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 
-$(OBJDIR_IPv6_checksum)/%.o: src/IPv6_checksum/%.c $(INCLUDES) | $(OBJDIR)
+$(OBJDIR_IPv6)/%.o: src/IPv6/%.c $(INCLUDES) | $(OBJDIR)
 	$(CC) -c $(CFLAGS) $< -o $@	
+
+$(OBJDIR_SCHC)/%.o: src/SCHC/%.c $(INCLUDES) | $(OBJDIR)
+	$(CC) -c $(CFLAGS) $< -o $@	
+
+
 ### static library
 
-libstack_ipv6.a:  $(OBJDIR_LoWPAN_HC)/LoWPAN_HC.o $(OBJDIR_tun_tap)/tun_tap.o $(OBJDIR_IPv6_checksum)/IPv6_checksum.o 
+libstack_ipv6.a:  $(OBJDIR_LoWPAN_IPHC)/LoWPAN_IPHC.o $(OBJDIR_tun_tap)/tun_tap.o $(OBJDIR_IPv6)/IPv6.o $(OBJDIR_SCHC)/SCHC.o 
 	$(AR) rcs $@ $^
 
 

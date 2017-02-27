@@ -16,7 +16,6 @@ all:
 	$(MAKE) all -e -C util_tx_continuous
 	$(MAKE) all -e -C util_spectral_scan
 	$(MAKE) all -e -C project_ipv6
-	
 
 clean:
 	$(MAKE) clean -e -C libloragw

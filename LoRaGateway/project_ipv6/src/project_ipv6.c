@@ -11,6 +11,8 @@ Description:
 
 License: Revised BSD License, see LICENSE.TXT file include in the project
 Maintainer: Sylvain Miermont
+
+edited by Tomás Lagos
 */
 
 
@@ -35,9 +37,10 @@ Maintainer: Sylvain Miermont
 #include <stdlib.h>     /* atoi */
 
 #include "loragw_hal.h"
-#include "LoWPAN_HC.h"
+#include "LoWPAN_IPHC.h"
 #include "tun_tap.h"
 #include "parson.h"
+#include "SCHC.h"
 
 
 /* -------------------------------------------------------------------------- */
@@ -49,7 +52,7 @@ Maintainer: Sylvain Miermont
 #define TX_RF_CHAIN          0    /* TX only supported on radio A */
 #define DEFAULT_RSSI_OFFSET  0.0
 #define DEFAULT_MODULATION   "LORA"
-#define DEFAULT_BR_KBPS      50
+#define DEFAULT_BR_KBPS      0.68375
 #define DEFAULT_FDEV_KHZ     25
 
 
@@ -343,25 +346,27 @@ int parse_gateway_configuration(const char * conf_file) {
 
 int main()
 {
-    int i, j; /* loop and temporary variables */
-    int delay = 4000;
+    int i; /* loop and temporary variables */
+    int delay =1000;
+    int payload_length;
     struct lgw_pkt_tx_s txpkt;
     uint32_t f_target = 868000000;
     int pow = 14;
     char mod[64] = DEFAULT_MODULATION;
     int bw = 125;
-    int sf = 7;
+    int sf = 10;
     int cr = 1;
     bool invert = false;
     int preamb = 8;
     int pl_size = 52;
     float br_kbps = DEFAULT_BR_KBPS;
     uint8_t fdev_khz = DEFAULT_FDEV_KHZ;
+    char *schc;
 
     int tun_fd = 0;
     char buffer[1500];
     int nread=0;
-    char *RoHC_package;
+    char *RoHC_package = malloc(sizeof(char *));
 
     lowpan_header *lowpanh = (lowpan_header *)malloc(sizeof(lowpan_header));
     ip6_buffer *decode = (ip6_buffer *)malloc(sizeof(ip6_buffer));
@@ -449,40 +454,42 @@ int main()
         if(tun_fd != -1)
         {
             nread = read(tun_fd,buffer,sizeof(buffer));
-            RoHC_package = IPv6ToMesh(buffer,nread,lowpanh);
+            
+            payload_length = ((int)buffer[5]);
+
+            RoHC_package = SCHC_TX(IPv6ToMesh(buffer, payload_length ,lowpanh), payload_length);
+            
             if(RoHC_package != NULL)
             {
                 printf("%s\n","manda mensaje");
-                txpkt.size = (nread - 40) +27;
-                for(j = 0; j < txpkt.size; j++ )
-                {
-                    txpkt.payload[j] = RoHC_package[j];
-                    printf("%i-", RoHC_package[j]);
-                }
-                printf("\n");
+                txpkt.size = (nread - 40) + 3;
+                
+                memcpy(txpkt.payload,RoHC_package,txpkt.size);
+                
                 i = lgw_send(txpkt);
 
-                wait_ms(delay);
-
+                
+                wait_ms(1);
                 nb_pkt = lgw_receive(ARRAY_SIZE(rxpkt), rxpkt);
                 /* log packets */
                 if(nb_pkt > 0)
                 {
-                    printf("%s\n","llego mensaje");
-                    p = &rxpkt[0];
-                    for(i = 0; i < p->size; i++)
+                    printf("%s\n","LLega mensaje");
+                    for(i = 0 ;i< p->size; i++ )
                     {
-                        printf("%i-", p->payload[i]);
+                        printf("%i-",p->payload[i]);
                     }
                     printf("\n");
+                    p = &rxpkt[0];
+                    
                     if(p->status == STAT_CRC_OK)
                     {
-                        IPv6Rx((char *)p->payload,p->size,tun_fd,decode);
+                        schc = SCHC_RX((char *)p->payload, p->size);
+                        IPv6Rx(schc,p->size-3,tun_fd,decode);
                     }
                 }
-                
+                wait_ms(delay);
             }
-
              
         }
 

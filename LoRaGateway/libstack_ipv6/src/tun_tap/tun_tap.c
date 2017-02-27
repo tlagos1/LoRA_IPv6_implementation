@@ -52,6 +52,8 @@ int init_tun()
     system(command);
     command = "ip -6 addr add BBBB:0000:0000:0000::1/64 dev tun0";
     system(command);
+    command = "ip -6 addr add fe80:0000:0000:0000::1/64 dev tun0";
+    system(command);
 
     strcpy(tun_name, "tun0");
 

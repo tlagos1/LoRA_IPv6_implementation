@@ -84,7 +84,7 @@ typedef struct lowpan
     } src;
     struct lowpan_addr2
     {
-      uint8_t slowpan_addr[8];
+      uint8_t slowpan_addr[16];
     } dst;
     struct lowpan_payload
     {
@@ -94,6 +94,7 @@ typedef struct lowpan
 
 typedef struct RoHC
 {
+    uint8_t Dispatch:3;
     uint8_t tfn:2;
     uint8_t nh:1;
     uint8_t hlim:2;

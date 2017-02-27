@@ -6,14 +6,14 @@
             "enable": true,
             "type": "SX1257",
             "freq": 868000000,
-            "rssi_offset": -166.0,
+            "rssi_offset": 0,
             "tx_enable": true
         },
         "radio_1": {
             "enable": true,
             "type": "SX1257",
             "freq": 868500000,
-            "rssi_offset": -166.0,
+            "rssi_offset": 0,
             "tx_enable": false
         },
         "chan_multiSF_0": {
@@ -70,7 +70,7 @@
             "radio": 0,
             "if": 0,
             "bandwidth": 150000,
-            "spread_factor": 12
+            "spread_factor": 7
         },
         "chan_FSK": {
             /* FSK 50kbps channel, 868.8 MHz */
