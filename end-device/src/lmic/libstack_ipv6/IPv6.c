@@ -3,6 +3,9 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
+
+uint8_t *addr = NULL;
 
 uint16_t checksum (uint16_t *addr, int len)
 {
@@ -94,4 +97,30 @@ uint16_t checksum_icmpv6(char *buffer,int lenght_buffer)
         j++  ;
     }
     return checksum ((uint16_t *)chksum, j); 
+}
+
+uint16_t checksum_schc(char *buffer,int payload_lenght)
+{
+    int j = 0;
+    char chksum[64];
+    memcpy(&chksum[0], &buffer[0], 1);
+    j++;
+    memcpy(&chksum[1], &buffer[3], payload_lenght);
+    j+=payload_lenght;
+    return checksum ((uint16_t *)chksum, j); 
+}
+
+uint8_t *IPv6_address(uint8_t *last_B_addr)
+{
+  uint8_t first_B_addr[8] = {0xfe, 0x80, 0 ,0 ,0 ,0 ,0 ,0};
+
+  if(addr == NULL)
+  {
+      addr = malloc(sizeof(uint8_t *));  
+  }
+
+  memcpy(&addr[0],&first_B_addr,8);
+  memcpy(&addr[8],&last_B_addr[0],8);
+
+  return addr;
 }

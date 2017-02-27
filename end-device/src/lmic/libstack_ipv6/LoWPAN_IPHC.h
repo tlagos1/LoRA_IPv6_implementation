@@ -83,7 +83,7 @@ typedef struct lowpan
     } src;
     struct lowpan_addr2
     {
-      uint8_t slowpan_addr[8];
+      uint8_t slowpan_addr[16];
     } dst;
     struct lowpan_payload
     {
@@ -107,4 +107,4 @@ typedef struct RoHC
 
 char *IPv6ToMesh(char *, int,lowpan_header *);
  
-char *IPv6Rx(char *, int, int,ip6_buffer *);
+char *IPv6Rx(char *, int, int,ip6_buffer *,uint8_t *);
