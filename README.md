@@ -2,7 +2,7 @@
 
 ## Introduction
 
-LoRa is a Low-power, wide-area network that allows to build systems to obtain data on long distances using low bandwith, giving providing a long battery life to the nodes. This tecnology has the ability to send short packets using Direct Sequence Spread Spectrum (DSSS) in large time intervals. 
+LoRa is a Low-power, wide-area network that allows to build systems to obtain data on long distances using low bandwith, providing a long battery life to the nodes. This tecnology has the ability to send short packets using Direct Sequence Spread Spectrum (DSSS) in large time intervals. 
 
 This project aims to implement IPv6 for LoRa networks including  Neighbor Discovery service and basic IPv6 configuration. 
 
@@ -30,5 +30,6 @@ For the initial version of the project, the following software components are pl
 	https://github.com/Lora-net/lora_gateway
 
 ##Updates
+27/02/2017 : 6LoWPAN_IPHC and SCHC implementation for ICMP6 communication between LoRa Gateway and LoRa Node.
 
-9/11/2016 : RoHC base and AES decryption added in LoRa GateWay. The hop limit is not configured.
+09/11/2016 : RoHC base and AES decryption added in LoRa GateWay. The hop limit is not configured.
