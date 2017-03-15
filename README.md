@@ -56,7 +56,7 @@ You can start sending and reciving package after the program says that the conce
 
 Folder: end-device/examples/ping
 	
-The goal of this program is make the Arduino UNO + inAir9 works like a LoRa node. To start runing the node, you have to upload the file in the Arduino UNO with its correspong libraries (ends-device library).
+The goal of this program is make the Arduino UNO + inAir9 works like a LoRa node. To start running the node, you have to upload the file in the Arduino UNO with its corresponding libraries (ends-device library).
 
 In this project, the LoRa node was configured with the IP fe80::3.
 
