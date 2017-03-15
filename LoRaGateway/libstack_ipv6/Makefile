@@ -12,7 +12,6 @@ OBJDIR_LoWPAN_IPHC = obj
 OBJDIR_tun_tap = obj
 OBJDIR_IPv6 = obj
 OBJDIR_SCHC = obj
-OBJDIR_SDI12 = obj
 INCLUDES = $(wildcard inc/*.h)
 
 ### linking options

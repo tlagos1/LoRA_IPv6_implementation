@@ -29,7 +29,47 @@ For the initial version of the project, the following software components are pl
 	LoraGateway project - LoRa Gateway project by semtech
 	https://github.com/Lora-net/lora_gateway
 
-##Updates
+### 1. IPv6 library: libstack_ipv6
+
+This directory contains the source to use IPv6 in the LoRa devices. It can be found at the following addresses:
+
+	- LoRaGateway/libstack_ipv6/
+	- end-device/src/lmic/libstack_ipv6/
+
+This library comes with the implementation of 6LoWPAN, SCHC and basics IPv6 functions explained in detail in its folder. 
+
+### 2. IPv6 programs
+
+For the good operation of IPv6, the following programs were created:
+
+#### 2.1 project_ipv6 
+
+Folder: LoRaGateway/project_ipv6
+	
+The goal of this program is make the Raspberry Py + IC880A works like a gateway. To make it work,   you must use the following command:
+
+	sudo ./project_ipv6
+
+You can start sending and reciving package after the program says that the concentrator is ready to go.
+
+#### 2.2 ping.ino 
+
+Folder: end-device/examples/ping
+	
+The goal of this program is make the Arduino UNO + inAir9 works like a LoRa node. To start runing the node, you have to upload the file in the Arduino UNO with its correspong libraries (ends-device library).
+
+In this project, the LoRa node was configured with the IP fe80::3.
+
+### Gateway diagram
+	<img src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema1.png" data-canonical-src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema1.png" width="800" />
+
+### Node diagram
+	<img src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema2.png" data-canonical-src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema2.png" width="800" />
+
+### Updates
+
+15/03/2017 : Beginning multicast Development, Readmes Updates. 
+
 27/02/2017 : 6LoWPAN_IPHC and SCHC implementation for ICMP6 communication between LoRa Gateway and LoRa Node.
 
 09/11/2016 : RoHC base and AES decryption added in LoRa GateWay. The hop limit is not configured.

@@ -34,7 +34,7 @@ LGW_INC += $(LGW_IPV6_PATH)/inc/SCHC.h
 
 ### Linking options
 
-LIBS := -lloragw -lstack_ipv6 -lrt -lm
+LIBS := -lloragw -lstack_ipv6 -lrt -lm -lpthread
 
 ### General build targets
 

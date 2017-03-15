@@ -477,6 +477,7 @@ int main(int argc, char **argv)
     while ((quit_sig != 1) && (exit_sig != 1)) {
         /* fetch packets */
         nb_pkt = lgw_receive(ARRAY_SIZE(rxpkt), rxpkt);
+        
         if (nb_pkt == LGW_HAL_ERROR) {
             MSG("ERROR: failed packet fetch, exiting\n");
             return EXIT_FAILURE;

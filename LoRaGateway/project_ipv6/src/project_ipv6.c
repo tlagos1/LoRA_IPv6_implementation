@@ -35,12 +35,14 @@ edited by Tomás Lagos
 #include <time.h>       /* time clock_gettime strftime gmtime clock_nanosleep*/
 #include <unistd.h>     /* getopt access */
 #include <stdlib.h>     /* atoi */
+#include <pthread.h>
 
 #include "loragw_hal.h"
 #include "LoWPAN_IPHC.h"
 #include "tun_tap.h"
 #include "parson.h"
 #include "SCHC.h"
+
 
 
 /* -------------------------------------------------------------------------- */
@@ -56,6 +58,8 @@ edited by Tomás Lagos
 #define DEFAULT_FDEV_KHZ     25
 
 
+pthread_t tid[2];
+pthread_mutex_t lock;
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE VARIABLES (GLOBAL) ------------------------------------------- */
@@ -86,9 +90,27 @@ void open_log(void);
 
 void usage (void);
 
+
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS DEFINITION ----------------------------------------- */
 
+struct value_tx
+{
+    int tun_fd; 
+    lowpan_header *lowpanh;
+    struct lgw_pkt_tx_s txpkt;
+    char *RoHC_package;
+    int delay;
+    lowpan_header *lowpanSC;
+    RoHC_base *RoV;
+};
+
+struct value_rx
+{
+    int tun_fd; 
+    ip6_buffer *decode;
+    RoHC_base *RoV;
+};
 
 int parse_SX1301_configuration(const char * conf_file) {
     int i;
@@ -340,15 +362,87 @@ int parse_gateway_configuration(const char * conf_file) {
     return 0;
 }
 
+void *send_package(void *data)
+{
+    struct value_tx *value_tx = data;
+
+    int tun_fd = value_tx->tun_fd;
+    struct lgw_pkt_tx_s txpkt = value_tx->txpkt;
+    int delay = value_tx->delay;
+
+    int payload_length;
+    int nread;
+    char buffer[1500];
+    char *RoHC_package;
+
+    if(tun_fd != -1)
+    {
+        while(true)
+        {
+            nread = read(tun_fd,buffer,sizeof(buffer));
+            
+            payload_length = ((int)buffer[5]);
+
+            RoHC_package = SCHC_TX(IPv6ToMesh(buffer, payload_length ,value_tx->lowpanh), payload_length, value_tx->lowpanSC, value_tx->RoV);
+
+            if(RoHC_package != NULL)
+            {
+                txpkt.size = (nread - 40) + 3;
+                
+                memcpy(txpkt.payload,RoHC_package,txpkt.size);
+                
+                lgw_send(txpkt);
+            }
+            wait_ms(delay);
+        }    
+    }
+    return 0;
+}
+
+void *recive_package(void *data)
+{
+    struct lgw_pkt_rx_s *p;
+    struct lgw_pkt_rx_s rxpkt[16];
+
+    struct value_rx *value_rx = data;
+    
+    int tun_fd = value_rx->tun_fd; 
+    ip6_buffer *decode = value_rx->decode;
+ 
+    int nb_pkt;
+    int j;
+    char *schc;
+
+    while(true)
+    {
+
+        nb_pkt = lgw_receive(ARRAY_SIZE(rxpkt), rxpkt);
+        /* log packets */
+        if(nb_pkt > 0)
+        {
+            for (j = 0; j < nb_pkt; j++)
+            {
+                p = &rxpkt[0];
+                
+                if(p->status == STAT_CRC_OK)
+                {
+                    schc = SCHC_RX((char *)p->payload, p->size, value_rx->RoV);
+                    IPv6Rx(schc,p->size-3,tun_fd,decode);
+                }
+            }
+            
+        }
+    }
+    return 0;
+}
 
 /* -------------------------------------------------------------------------- */
 /* --- MAIN FUNCTION -------------------------------------------------------- */
 
 int main()
 {
-    int i; /* loop and temporary variables */
+    int i;
     int delay =1000;
-    int payload_length;
     struct lgw_pkt_tx_s txpkt;
     uint32_t f_target = 868000000;
     int pow = 14;
@@ -361,13 +455,16 @@ int main()
     int pl_size = 52;
     float br_kbps = DEFAULT_BR_KBPS;
     uint8_t fdev_khz = DEFAULT_FDEV_KHZ;
-    char *schc;
+    int tun_fd;
 
-    int tun_fd = 0;
-    char buffer[1500];
-    int nread=0;
-    char *RoHC_package = malloc(sizeof(char *));
 
+
+    lowpan_header *lowpanSC = (lowpan_header*)malloc(sizeof(lowpan_header));
+    RoHC_base *RoV = (RoHC_base*)malloc(sizeof(RoHC_base));
+    RoHC_base *RoV2 = (RoHC_base*)malloc(sizeof(RoHC_base));
+
+    
+    
     lowpan_header *lowpanh = (lowpan_header *)malloc(sizeof(lowpan_header));
     ip6_buffer *decode = (ip6_buffer *)malloc(sizeof(ip6_buffer));
     /* clock and log rotation management */
@@ -375,11 +472,6 @@ int main()
     unsigned long pkt_in_log = 0; /* count the number of packet written in each log file */
 
     const char global_conf_fname[] = "global_conf.json";
-
-    /* allocate memory for packet fetching and processing */
-    struct lgw_pkt_rx_s rxpkt[16]; /* array containing up to 16 inbound packets metadata */
-    struct lgw_pkt_rx_s *p; /* pointer on a RX packet */
-    int nb_pkt;
 
     /* configuration files management */
     
@@ -448,54 +540,36 @@ int main()
 
     tun_fd = init_tun();
 
-    /* main loop */
-    while (true) {
-        /* fetch packets */
-        if(tun_fd != -1)
-        {
-            nread = read(tun_fd,buffer,sizeof(buffer));
-            
-            payload_length = ((int)buffer[5]);
 
-            RoHC_package = SCHC_TX(IPv6ToMesh(buffer, payload_length ,lowpanh), payload_length);
-            
-            if(RoHC_package != NULL)
-            {
-                printf("%s\n","manda mensaje");
-                txpkt.size = (nread - 40) + 3;
-                
-                memcpy(txpkt.payload,RoHC_package,txpkt.size);
-                
-                i = lgw_send(txpkt);
 
-                
-                wait_ms(1);
-                nb_pkt = lgw_receive(ARRAY_SIZE(rxpkt), rxpkt);
-                /* log packets */
-                if(nb_pkt > 0)
-                {
-                    printf("%s\n","LLega mensaje");
-                    for(i = 0 ;i< p->size; i++ )
-                    {
-                        printf("%i-",p->payload[i]);
-                    }
-                    printf("\n");
-                    p = &rxpkt[0];
-                    
-                    if(p->status == STAT_CRC_OK)
-                    {
-                        schc = SCHC_RX((char *)p->payload, p->size);
-                        IPv6Rx(schc,p->size-3,tun_fd,decode);
-                    }
-                }
-                wait_ms(delay);
-            }
-             
-        }
+    struct value_tx *value_tx = malloc(sizeof(struct value_tx));
 
-        
+    value_tx->tun_fd = tun_fd;
+    value_tx->lowpanh = lowpanh;
+    value_tx->txpkt = txpkt;
+    value_tx->delay = delay;
+    value_tx->lowpanSC = lowpanSC;
+    value_tx->RoV = RoV;
+
+    struct value_rx *value_rx = malloc(sizeof(struct value_rx));
+
+    value_rx->tun_fd = tun_fd;
+    value_rx->decode = decode;
+    value_rx->RoV = RoV2;
+
+    /*////////////////////////////////////////threads TX RX //////////////////////////////////////////////////////////////////////*/
+
+    pthread_create(&(tid[0]), NULL, send_package, value_tx);
+
+    pthread_create(&(tid[1]), NULL, recive_package, value_rx);
+    
+    while(true)
+    {
+        sleep(1);
     }
 
+    /*////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
+    
     if (exit_sig == 1) {
         /* clean up before leaving */
         i = lgw_stop();

@@ -23,7 +23,7 @@ uint8_t check_rule(lowpan_header *lowpan_HC,int src_length,int dst_length)
 
    
 
-    /* ///////////////////////////////////////////////// start checking Rule 4//////////////////////////////////////////////*/
+    /* ///////////////////////////////////////////////// start checking Rule 2//////////////////////////////////////////////*/
 
     if(src_length == 8 && dst_length == 8)
     {
@@ -34,7 +34,7 @@ uint8_t check_rule(lowpan_header *lowpan_HC,int src_length,int dst_length)
         src[4] = 0;  dst[4] = 0;
         src[5] = 0;  dst[5] = 0;
         src[6] = 0;  dst[6] = 0;
-        src[7] = 2;  dst[7] = 1;
+        src[7] = 3;  dst[7] = 1;
 
         if(lowpan_HC->tf == 0)
         {
@@ -67,13 +67,67 @@ uint8_t check_rule(lowpan_header *lowpan_HC,int src_length,int dst_length)
         }
         if(valid_rule == 6)
         {
-            rule = 4;
+            rule = 2;
             return rule;
         }
 
     }
 
-     /* ///////////////////////////////////////////////// end checking Rule 4////////////////////////////////////////////// */
+     /* ///////////////////////////////////////////////// end checking Rule 2////////////////////////////////////////////// */
+
+    valid_rule = 0;
+
+    /* ///////////////////////////////////////////////// start checking Rule 6//////////////////////////////////////////////*/
+
+    if(src_length == 8 && dst_length == 8)
+    {
+        src[0] = 0;  dst[0] = 0;
+        src[1] = 0;  dst[1] = 0;
+        src[2] = 0;  dst[2] = 0;
+        src[3] = 0;  dst[3] = 0;
+        src[4] = 0;  dst[4] = 0;
+        src[5] = 0;  dst[5] = 0;
+        src[6] = 0;  dst[6] = 0;
+        src[7] = 3;  dst[7] = 1;
+
+        if(lowpan_HC->tf == 0)
+        {
+           valid_rule ++;
+        }
+
+        if(lowpan_HC->nh == 58)
+        {
+            valid_rule++;
+        }
+
+        if(lowpan_HC->hlim == 1)
+        {
+            valid_rule++;
+        }
+
+        if(lowpan_HC->cid == 0)
+        {
+            valid_rule++;
+        }
+
+        if(memcmp(&lowpan_HC->src.slowpan_addr[0],&src[0],8) == 0)
+        {
+            valid_rule++;
+            
+        }
+        if(memcmp(lowpan_HC->dst.slowpan_addr,dst,8) == 0)
+        {
+            valid_rule++;
+        }
+        if(valid_rule == 6)
+        {
+            rule = 7;
+            return rule;
+        }
+
+    }
+
+     /* ///////////////////////////////////////////////// end checking Rule 6////////////////////////////////////////////// */
     return 0;
 }
 
@@ -109,20 +163,30 @@ char *SCHC_TX(char *LoWPAN_HC, int payload_length)
     RoV->dac = (base[1] >> 2) & 1;
     RoV->dam = base[1] & 3;
 
-
+    /*/////////////////////////////////////// 6LoWPAN tf /////////////////////////////////////////////*/
     if(RoV->tfn == 3)
     {
         lowpanSC->tf = 0;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN nh /////////////////////////////////////////////*/
     if(RoV->nh == 0)
     {
         memcpy(&lowpanSC->nh, &LoWPAN_HC[2], 1);
         j+=1;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN hlim /////////////////////////////////////////////*/
     if(RoV->hlim == 2)
     {
        lowpanSC->hlim = 64;
     }
+    else if (RoV->hlim == 1)
+    {
+        lowpanSC->hlim = 1;
+    }
+
+    /*/////////////////////////////////////// 6LoWPAN cid /////////////////////////////////////////////*/
     if(RoV->cid == 1)
     {
        lowpanSC->cid = 8;
@@ -131,6 +195,8 @@ char *SCHC_TX(char *LoWPAN_HC, int payload_length)
     {
         lowpanSC->cid = 0;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN sam - sac /////////////////////////////////////////////*/
     if(RoV->sam == 0)
     {
         if(RoV->sac == 0)
@@ -151,6 +217,7 @@ char *SCHC_TX(char *LoWPAN_HC, int payload_length)
     }
 
 
+    /*/////////////////////////////////////// 6LoWPAN m - dac - dam /////////////////////////////////////////////*/
     if(RoV->m == 0 && RoV->dac == 0)
     {
         if(RoV->dam == 1)
@@ -158,6 +225,15 @@ char *SCHC_TX(char *LoWPAN_HC, int payload_length)
             memcpy(lowpanSC->dst.slowpan_addr, &LoWPAN_HC[j], 8);
             dst_length = 8; 
             j += 8;
+        }
+    }
+    else if(RoV->m == 1 && RoV->dac == 0)
+    {
+        if(RoV->dam == 3)
+        {
+            memcpy(lowpanSC->dst.slowpan_addr, &LoWPAN_HC[j], 1);
+            dst_length = 1; 
+            j += 1;
         }
     }
 
@@ -200,7 +276,7 @@ char *SCHC_RX(char *LoWPAN_HC, int payload_length)
     
 
 /* ///////////////////////////////////////////////// start saved Rule 3//////////////////////////////////////////////*/    
-    if(rule == 3)
+    if(rule == 1)
     {
 
         src_aux[0] = 0;  dst_aux[0] = 0; 
@@ -210,7 +286,7 @@ char *SCHC_RX(char *LoWPAN_HC, int payload_length)
         src_aux[4] = 0;  dst_aux[4] = 0;
         src_aux[5] = 0;  dst_aux[5] = 0;
         src_aux[6] = 0;  dst_aux[6] = 0;
-        src_aux[7] = 1;  dst_aux[7] = 2;
+        src_aux[7] = 1;  dst_aux[7] = 3;
 
         RoV->tfn  = 3;
         RoV->nh   = 0; 
@@ -225,7 +301,34 @@ char *SCHC_RX(char *LoWPAN_HC, int payload_length)
         nh   = 58;
         hlim = 64;
     }
-/* ///////////////////////////////////////////////// end Rule 3//////////////////////////////////////////////*/     
+/* ///////////////////////////////////////////////// end Rule 3//////////////////////////////////////////////*/
+/* ///////////////////////////////////////////////// start saved Rule 5//////////////////////////////////////////////*/    
+    if(rule == 5)
+    {
+
+        src_aux[0] = 0;  dst_aux[0] = 1; 
+        src_aux[1] = 0;  
+        src_aux[2] = 0;  
+        src_aux[3] = 0;  
+        src_aux[4] = 0;  
+        src_aux[5] = 0;  
+        src_aux[6] = 0;  
+        src_aux[7] = 1;  
+
+        RoV->tfn  = 3;
+        RoV->nh   = 0; 
+        RoV->hlim = 1; 
+        RoV->cid  = 0;
+        RoV->sac  = 0;
+        RoV->sam  = 1;
+        RoV->m    = 1;
+        RoV->dac  = 0;
+        RoV->dam  = 3;
+
+        nh   = 58;
+        hlim = 1;
+    }
+/* ///////////////////////////////////////////////// end Rule 5//////////////////////////////////////////////*/     
 
     memcpy(payload,&LoWPAN_HC[3], payload_length);
  
@@ -245,24 +348,38 @@ char *SCHC_RX(char *LoWPAN_HC, int payload_length)
     LoWPAN_HC[1] |= (RoV->sac   << 6);
     LoWPAN_HC[1] |= (RoV->cid   << 7);
 
+    /*/////////////////////////////////////// 6LoWPAN tf /////////////////////////////////////////////*/
+    
     if(RoV->tfn == 3)
     {
         j = 2;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN nh /////////////////////////////////////////////*/
+    
     if(RoV->nh == 0)
     {
         LoWPAN_HC[j] = nh ;
         j++;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN hlim /////////////////////////////////////////////*/
+    
     if(RoV->hlim == 0)
     {
         LoWPAN_HC[j] = hlim;
         j++;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN cid /////////////////////////////////////////////*/
+    
     if(RoV->cid == 1)
     {
        j += 8;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN sam - sac /////////////////////////////////////////////*/
+
     if(RoV->sam == 0)
     {
         if(RoV->sac == 0)
@@ -271,7 +388,6 @@ char *SCHC_RX(char *LoWPAN_HC, int payload_length)
             j += 16;
         }
     }
-
     else if(RoV->sam == 1)
     {
         if(RoV->sac == 0)
@@ -281,6 +397,8 @@ char *SCHC_RX(char *LoWPAN_HC, int payload_length)
         }
     }
 
+    /*/////////////////////////////////////// 6LoWPAN m - dac - dam /////////////////////////////////////////////*/
+
     if(RoV->m == 0 && RoV->dac == 0)
     {
         if(RoV->dam == 1)
@@ -289,6 +407,15 @@ char *SCHC_RX(char *LoWPAN_HC, int payload_length)
             j += 8;
         }
     }
+    else if(RoV->m == 1 && RoV->dac == 0)
+    {
+        if(RoV->dam == 3)
+        {
+            memcpy(&LoWPAN_HC[j], dst_aux, 1);
+            j += 1;
+        }
+    }
+
     memcpy(&LoWPAN_HC[j], payload, payload_length);
 
     return LoWPAN_HC;

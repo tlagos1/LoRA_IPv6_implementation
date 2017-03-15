@@ -29,9 +29,15 @@ char *reassemble_lowpan(lowpan_header *lowpan, int payload_lenght, int src_lengh
         buffer = malloc(sizeof(char *));
     }
 
+    /*/////////////////////////////////////// 6LoWPAN tf /////////////////////////////////////////////*/
+    
     aux->tfn = IPHC_TF_ELIDED;
 
+    /*/////////////////////////////////////// 6LoWPAN nh /////////////////////////////////////////////*/
+
     aux->nh = IPHC_NH_INLINE;
+
+    /*/////////////////////////////////////// 6LoWPAN hlim /////////////////////////////////////////////*/
 
     if (lowpan->hlim == 1)
     {
@@ -52,12 +58,16 @@ char *reassemble_lowpan(lowpan_header *lowpan, int payload_lenght, int src_lengh
     {
         aux->hlim = IPHC_HLIM_255; 
     }    
-      ///////////////////////////////////////////////////////////
+
+    /*/////////////////////////////////////// 6LoWPAN cid /////////////////////////////////////////////*/
 
     aux->cid = IPHC_CID_NO;
 
+    /*/////////////////////////////////////// 6LoWPAN sac /////////////////////////////////////////////*/
 
     aux->sac = IPHC_SAC_STATELESS;
+
+    /*/////////////////////////////////////// 6LoWPAN sam /////////////////////////////////////////////*/
 
     if(src_lenght == 16)
     {   
@@ -76,25 +86,49 @@ char *reassemble_lowpan(lowpan_header *lowpan, int payload_lenght, int src_lengh
         aux->sam = IPHC_SAM_ELIDED;
     }    
 
-    aux->m = IPHC_M_NO;
+    /*/////////////////////////////////////// 6LoWPAN m /////////////////////////////////////////////*/
+
+    if(dst_lenght == 1)
+    {
+        aux->m = IPHC_M_YES; 
+    }
+    else
+    {
+       aux->m = IPHC_M_NO; 
+    }
+    
+    /*/////////////////////////////////////// 6LoWPAN dac /////////////////////////////////////////////*/
+    
     aux->dac = IPHC_DAC_STATELESS;
 
-    if(dst_lenght == 16)
+    /*/////////////////////////////////////// 6LoWPAN dam /////////////////////////////////////////////*/
+
+    if(aux->m == 0 && aux->dac == 0)
     {
-        aux->dam = IPHC_DAM_128B;
+        if(dst_lenght == 16)
+        {
+            aux->dam = IPHC_DAM_128B;
+        }
+        else if (dst_lenght == 8)
+        {
+            aux->dam = IPHC_DAM_64B;
+        }
+        else if (dst_lenght == 2)
+        {
+            aux->dam = IPHC_DAM_16B;
+        }
+        else if (dst_lenght == 0)
+        {
+            aux->dam = IPHC_DAM_ELIDED;
+        }    
     }
-    else if (dst_lenght == 8)
+    else if(aux->m == 1 && aux->dac == 0)
     {
-        aux->dam = IPHC_DAM_64B;
+        aux->dam = 3;
     }
-    else if (dst_lenght == 2)
-    {
-        aux->dam = IPHC_DAM_16B;
-    }
-    else if (dst_lenght == 0)
-    {
-        aux->dam = IPHC_DAM_ELIDED;
-    }
+    
+    /*/////////////////////////////////////// 6LoWPAN first 2 bytes buffer /////////////////////////////////////////////*/
+
     returnValueBase = 0;
     returnValueBase |= (aux->hlim         << 0);
     returnValueBase |= (aux->nh           << 2);
@@ -119,15 +153,19 @@ char *reassemble_lowpan(lowpan_header *lowpan, int payload_lenght, int src_lengh
     buffer[2] = lowpan->nh;
     packet_size++;
 
+    /*/////////////////////////////////////// 6LoWPAN leftover bytes buffer /////////////////////////////////////////////*/
+
     j = 3;
 
     memcpy(&buffer[j],lowpan->src.slowpan_addr,src_lenght);
     j += src_lenght;
     packet_size += src_lenght;
+    
 
     memcpy(&buffer[j],lowpan->dst.slowpan_addr,dst_lenght);
     j += dst_lenght;
     packet_size += dst_lenght;
+
 
     memcpy(&buffer[j],lowpan->payload.slowpan_payload,payload_lenght);
     j += payload_lenght;
@@ -148,58 +186,66 @@ char *reassemble_lowpan(lowpan_header *lowpan, int payload_lenght, int src_lengh
 
 char *IPv6ToMesh(char *buffer, int payload_length, lowpan_header *lowpanh)
 {
+
     ip6_buffer *iph = (ip6_buffer *)buffer;
 
-    if (iph->ip6_dst.s6_addr[0] == 0xff)
+    lowpanh->nh = iph->ip6_ctlun.ip6_un1.ip6_un1_nxt;
+    lowpanh->hlim = iph->ip6_ctlun.ip6_un1.ip6_un1_hlim;
+
+    int ip6_src_len = 0,ip6_dst_len = 0;
+
+    /*/////////////////////////////////////// source address /////////////////////////////////////////////*/
+    
+    if(iph->ip6_src.s6_addr[0] == 0xfe && iph->ip6_src.s6_addr[1] == 0x80)
     {
-      return NULL;
+        memcpy(lowpanh->src.slowpan_addr,&iph->ip6_src.s6_addr[8],8);
+        ip6_src_len = 8;
     }
     else
     {
-        lowpanh->nh = iph->ip6_ctlun.ip6_un1.ip6_un1_nxt;
-        lowpanh->hlim = iph->ip6_ctlun.ip6_un1.ip6_un1_hlim;
-
-        int ip6_src_len = 0,ip6_dst_len = 0;
-
-        if(iph->ip6_src.s6_addr[0] == 0xfe && iph->ip6_src.s6_addr[1] == 0x80)
-        {
-            memcpy(lowpanh->src.slowpan_addr,&iph->ip6_src.s6_addr[8],8);
-            ip6_src_len = 8;
-        }
-        else
-        {
-            memcpy(lowpanh->src.slowpan_addr,&iph->ip6_src.s6_addr[0],16);
-            ip6_src_len = 16;
-        }
-
-        if(iph->ip6_dst.s6_addr[0] == 0xfe && iph->ip6_dst.s6_addr[1] == 0x80)
-        {
-            memcpy(lowpanh->dst.slowpan_addr,&iph->ip6_dst.s6_addr[8],8);
-            ip6_dst_len = 8;
-        }
-        else
-        {
-            memcpy(lowpanh->dst.slowpan_addr,&iph->ip6_dst.s6_addr[0],16);
-            ip6_dst_len = 16;
-        }
-        
-        memcpy(lowpanh->payload.slowpan_payload,&buffer[40],payload_length);
-
-        buffer = reassemble_lowpan(lowpanh, payload_length, ip6_src_len, ip6_dst_len);
-        if( buffer != NULL)
-        {
-            return buffer;    
-        }
-        else
-        {
-            return NULL;
-        }  
+        memcpy(lowpanh->src.slowpan_addr,&iph->ip6_src.s6_addr[0],16);
+        ip6_src_len = 16;
     }
+
+
+    /*/////////////////////////////////////// destination address /////////////////////////////////////////////*/
+
+    if(iph->ip6_dst.s6_addr[0] == 0xfe && iph->ip6_dst.s6_addr[1] == 0x80)
+    {
+        memcpy(lowpanh->dst.slowpan_addr,&iph->ip6_dst.s6_addr[8],8);
+        ip6_dst_len = 8;
+    }
+
+    else if(iph->ip6_dst.s6_addr[0] == 0xff && iph->ip6_dst.s6_addr[1] == 0x02 && iph->ip6_dst.s6_addr[15] == 0x01)
+    {
+        memcpy(lowpanh->dst.slowpan_addr,&iph->ip6_dst.s6_addr[15],1);
+        ip6_dst_len = 1;
+    }
+    else
+    {
+        memcpy(lowpanh->dst.slowpan_addr,&iph->ip6_dst.s6_addr[0],16);
+        ip6_dst_len = 16;
+    }
+
+    /*/////////////////////////////////////// payload /////////////////////////////////////////////*/
+
+    memcpy(lowpanh->payload.slowpan_payload,&buffer[40],payload_length);
+
+    
+    buffer = reassemble_lowpan(lowpanh, payload_length, ip6_src_len, ip6_dst_len);
+
+    if( buffer != NULL)
+    {
+        return buffer;    
+    }
+    else
+    {
+        return NULL;
+    }  
+    
 }
 
-
-
-ip6_buffer *DecodeIPv6(char *buffer,int payload_length)
+ip6_buffer *DecodeIPv6(char *buffer,int payload_length, uint8_t *IPv6_addr)
 {
     int i,j,k;
     
@@ -219,10 +265,15 @@ ip6_buffer *DecodeIPv6(char *buffer,int payload_length)
     HRbase->dam = buffer[1] & 3;
 
     decode->ip6_ctlun.ip6_un1.ip6_un1_flow = 0x60;
+
+    /*/////////////////////////////////////// 6LoWPAN tf /////////////////////////////////////////////*/
+    
     if(HRbase->tfn == 3)
     {
         j = 2;
     }
+
+    /*/////////////////////////////////////// 6LoWPAN nh /////////////////////////////////////////////*/
 
     if(HRbase->nh == 0)
     {
@@ -230,16 +281,26 @@ ip6_buffer *DecodeIPv6(char *buffer,int payload_length)
         j++;
     }
 
+    /*/////////////////////////////////////// 6LoWPAN hlim /////////////////////////////////////////////*/
+
     if(HRbase->hlim == 2)
     {
         decode->ip6_ctlun.ip6_un1.ip6_un1_hlim = 64;
     }
+    else if(HRbase->hlim == 1)
+    {
+        decode->ip6_ctlun.ip6_un1.ip6_un1_hlim = 1;
+    }
 
+    /*/////////////////////////////////////// 6LoWPAN cid /////////////////////////////////////////////*/
+    
     if(HRbase->cid == 1)
     {
        j += 8;
     }
 
+    /*/////////////////////////////////////// 6LoWPAN sam - sac /////////////////////////////////////////////*/
+    
     if(HRbase->sam == 0)
     {
         if(HRbase->sac == 0)
@@ -248,7 +309,6 @@ ip6_buffer *DecodeIPv6(char *buffer,int payload_length)
             j += 16;
         }
     }
-
     else if(HRbase->sam == 1)
     {
         if(HRbase->sac == 0)
@@ -263,6 +323,8 @@ ip6_buffer *DecodeIPv6(char *buffer,int payload_length)
             j += 8;
         }
     }
+
+    /*/////////////////////////////////////// 6LoWPAN m - dac - dam /////////////////////////////////////////////*/
 
     if(HRbase->m == 0 && HRbase->dac == 0)
     {
@@ -279,6 +341,17 @@ ip6_buffer *DecodeIPv6(char *buffer,int payload_length)
             j += 8;  
         }
     }
+    else if(HRbase->m == 1 && HRbase->dac == 0)
+    {
+        if(HRbase->dam == 3)
+        {
+            memcpy(&decode->ip6_dst.s6_addr,IPv6_addr,16);
+            j += 1;  
+        }
+    }
+
+
+    /*/////////////////////////////////////// 6LoWPAN payload /////////////////////////////////////////////*/
 
     k=j;
 
@@ -309,9 +382,10 @@ char *IPv6Rx(char *buffer, int payload_length, int tun_fd, ip6_buffer *dec,uint8
 
     ptr = &buffer[0];
     
-    dec = DecodeIPv6(buffer, payload_length);
 
+    dec = DecodeIPv6(buffer, payload_length, IPv6_addr);
 
+   
     for(i = 0; i < 16; i++)
     {
         if(IPv6_addr[i] != dec->ip6_dst.s6_addr[i])
@@ -319,7 +393,7 @@ char *IPv6Rx(char *buffer, int payload_length, int tun_fd, ip6_buffer *dec,uint8
             IP = -1;
         }
     }
-
+    
     if(IP == 1)
     {
         if(dec->ip6_ctlun.ip6_un1.ip6_un1_nxt == 58)
