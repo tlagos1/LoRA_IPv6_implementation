@@ -12,7 +12,7 @@ The LoRa IPv6 library is compose by the following folders
 ## Library functions 
 ### 1. LoWPAN_IPHC
 
-* **IPv6ToMesh**: This function dissects the IPv6 header to assemble it later in the 6LoWPAN format using the function. **reassemble_lowpan** 
+* **IPv6ToMesh**: This function dissects the IPv6 header to assemble it later in the 6LoWPAN format using the function **reassemble_lowpan** 
     * **reassemble_lowpan**: It build the 6LoWPAN format with the IPv6 header components.
 * **IPv6Rx**: It receive the 6LoWPAN buffer and decode it in a IPv6 buffer using the function **DecodeIPv6**.
     * **DecodeIPv6**: It decode 6LoWPAN in IPv6. 
