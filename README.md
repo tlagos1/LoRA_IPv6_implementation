@@ -60,13 +60,13 @@ The goal of this program is make the Arduino UNO + inAir9 works like a LoRa node
 
 In this project, the LoRa node was configured with the IP fe80::3.
 
-### Gateway diagram
+## Gateway diagram
 <img src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema1.png" data-canonical-src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema1.png" width="700" />
 
-### Node diagram
+## Node diagram
 <img src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema2.png" data-canonical-src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema2.png" width="800" />
 
-### Updates
+## Updates
 
 15/03/2017 : Beginning multicast Development, Readmes Updates. 
 
