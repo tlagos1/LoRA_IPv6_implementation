@@ -27,7 +27,6 @@ OBJDIR = obj
 
 LGW_INC = $(LGW_PATH)/inc/config.h
 LGW_INC += $(LGW_PATH)/inc/loragw_hal.h
-LGW_INC += $(LGW_IPV6_PATH)/inc/LoWPAN_IPHC.h
 LGW_INC += $(LGW_IPV6_PATH)/inc/tun_tap.h
 LGW_INC += $(LGW_IPV6_PATH)/inc/SCHC.h
 

@@ -38,10 +38,10 @@ edited by Tomás Lagos
 #include <pthread.h>
 
 #include "loragw_hal.h"
-#include "LoWPAN_IPHC.h"
 #include "tun_tap.h"
 #include "parson.h"
 #include "SCHC.h"
+#include "IPv6.h"
 
 
 
@@ -58,8 +58,14 @@ edited by Tomás Lagos
 #define DEFAULT_FDEV_KHZ     25
 
 
-pthread_t tid[2];
+pthread_t tid[3];
 pthread_mutex_t lock;
+
+int exit_program = 0;
+
+NodeList *list;
+
+uint8_t DEVEUI[8]={0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE VARIABLES (GLOBAL) ------------------------------------------- */
@@ -97,20 +103,21 @@ void usage (void);
 struct value_tx
 {
     int tun_fd; 
-    lowpan_header *lowpanh;
     struct lgw_pkt_tx_s txpkt;
-    char *RoHC_package;
     int delay;
-    lowpan_header *lowpanSC;
-    RoHC_base *RoV;
+    char *schc_buffer;
+    ip6_header_buffer *ipv6_header_schc;
 };
 
 struct value_rx
 {
+    struct lgw_pkt_tx_s txpkt;
     int tun_fd; 
-    ip6_buffer *decode;
-    RoHC_base *RoV;
+    char *schc_buffer;
+    ip6_header_buffer *ipv6_header_schc;
+
 };
+
 
 int parse_SX1301_configuration(const char * conf_file) {
     int i;
@@ -361,19 +368,81 @@ int parse_gateway_configuration(const char * conf_file) {
     json_value_free(root_val);
     return 0;
 }
+void *menu(void *data)
+{
+
+    int option;
+    int i;
+    NodeList *aux;
+    while(true)
+    {
+        printf("\n\n\n");
+        printf("======================================================================\n");
+        printf("--------------------------Project IPv6--------------------------------\n");
+        printf("======================================================================\n\n\n");
+        printf("1) Show connected devices\n");
+        //printf("2) stop LoRa concentrator\n");
+        printf("Option: ");
+        
+        scanf("%i",&option);
+ 
+        switch(option)
+        {
+            case 1:
+                aux = list;
+                printf("\n\n|              IPv6                 |     mac     |\n");
+                while(aux != NULL)
+                {
+                    printf("| ");
+                    for (i = 0; i < 16; ++i)
+                    {
+                        if((i + 1) == 16)
+                        {
+                             printf("%x",aux->IPv6.addr[i]);
+                        }
+                        else
+                        {
+                            printf("%x-",aux->IPv6.addr[i]);
+                        }
+
+                    }
+                    printf(" | ");
+                    for (i = 0; i < 6; ++i)
+                    {
+                        if((i + 1) == 6)
+                        {
+                             printf("%x",aux->mac.addr[i]);
+                        }
+                        else
+                        {
+                            printf("%x-",aux->mac.addr[i]);
+                        }
+                    }
+                    printf(" |\n");
+                    aux = aux->back;
+                }
+            /*case 2:
+                pthread_mutex_lock(&lock);
+                    exit_program = 1; 
+                pthread_mutex_unlock(&lock);*/
+                              
+        }
+    }
+
+}
 
 void *send_package(void *data)
 {
+    int payload_size = 0;
+
     struct value_tx *value_tx = data;
 
     int tun_fd = value_tx->tun_fd;
     struct lgw_pkt_tx_s txpkt = value_tx->txpkt;
     int delay = value_tx->delay;
 
-    int payload_length;
     int nread;
     char buffer[1500];
-    char *RoHC_package;
 
     if(tun_fd != -1)
     {
@@ -381,16 +450,18 @@ void *send_package(void *data)
         {
             nread = read(tun_fd,buffer,sizeof(buffer));
             
-            payload_length = ((int)buffer[5]);
+            payload_size = (nread - 40);
 
-            RoHC_package = SCHC_TX(IPv6ToMesh(buffer, payload_length ,value_tx->lowpanh), payload_length, value_tx->lowpanSC, value_tx->RoV);
+            memcpy(buffer,schc_compression(buffer, value_tx->schc_buffer, value_tx->ipv6_header_schc),1500);
 
-            if(RoHC_package != NULL)
+            if(buffer != NULL)
             {
-                txpkt.size = (nread - 40) + 3;
-                
-                memcpy(txpkt.payload,RoHC_package,txpkt.size);
-                
+                if(buffer[0] == 0x10) 
+                {
+                    // ==> 00001000 ==> rule + last 8 bytes src + last 8 bytes dst + ICMP seq + ICMP identifier + (payload_length - echo request)
+                    txpkt.size = (1 + 8 + 8 + 2 + 2 + (payload_size - 8));
+                }
+                memcpy(txpkt.payload,buffer,txpkt.size);
                 lgw_send(txpkt);
             }
             wait_ms(delay);
@@ -401,21 +472,32 @@ void *send_package(void *data)
 
 void *recive_package(void *data)
 {
+
+    struct value_rx *value_rx = data;
+
     struct lgw_pkt_rx_s *p;
     struct lgw_pkt_rx_s rxpkt[16];
 
-    struct value_rx *value_rx = data;
+    struct lgw_pkt_tx_s txpkt = value_rx->txpkt;
     
-    int tun_fd = value_rx->tun_fd; 
-    ip6_buffer *decode = value_rx->decode;
+    int tun_fd = value_rx->tun_fd;    
  
     int nb_pkt;
-    int j;
-    char *schc;
+
+    int i,j;
+
+    int offset;
+
+    uint8_t IPv6[16];
+    
+    uint16_t packet_size = 0;
+
+    char buffer[1500];
 
     while(true)
     {
-
+        
+        offset = 40;
         nb_pkt = lgw_receive(ARRAY_SIZE(rxpkt), rxpkt);
         /* log packets */
         if(nb_pkt > 0)
@@ -425,12 +507,148 @@ void *recive_package(void *data)
                 p = &rxpkt[0];
                 
                 if(p->status == STAT_CRC_OK)
-                {
-                    schc = SCHC_RX((char *)p->payload, p->size, value_rx->RoV);
-                    IPv6Rx(schc,p->size-3,tun_fd,decode);
+                {          
+                    memcpy(&buffer[0],schc_decompression((char *)p->payload, buffer, p->size), 1500); 
+
+                    if(buffer[6] == 0x3A) // icmp
+                    {
+                        if(buffer[offset] == 0x81) // echo reply
+                        {
+                            // 40 bytes of header + (schc size - icmp header) - (rule + last 8 bytes src + last 8 bytes dst + ICMP seq + ICMP identifier)
+                            packet_size = 40 + (( p->size + 8) - (1 + 8 + 8 + 2 + 2));
+
+                            write(tun_fd, buffer, packet_size );
+                        }
+                        else if(buffer[offset] == 0x85) // router solicitation 
+                        {
+                            
+                            printf("%s\n","Router solicitation!" );
+                            
+                            packet_size = buffer[4] << 8 | buffer[5];
+                            
+                            for(i = 0; i < (packet_size + 40); i++)
+                            {
+                                printf("%i-",buffer[i] );
+                            }
+                            printf("\n--------------------------------------------------\n\n");
+
+                            printf("%s\n","Router advertisement!" );
+                            
+                            uint8_t mac_addr[6];
+
+                            for(i = 2; i < 8; i++)
+                            {
+                                mac_addr[i-2] = DEVEUI[i];
+                            }
+
+                            memcpy(&buffer[0],router_advertisement(buffer, IPv6_address(DEVEUI, IPv6), mac_addr),1500);
+
+                            packet_size = buffer[4] << 8 | buffer[5];
+
+                            for(i = 0; i < (packet_size + 40); i++)
+                            {
+                                printf("%i-",buffer[i] );
+                            }
+                            printf("\n--------------------------------------------------\n\n");
+
+                            memcpy(buffer,schc_compression(buffer, value_rx->schc_buffer, value_rx->ipv6_header_schc),1500);
+
+                            pthread_mutex_lock(&lock);
+
+                                txpkt.size = (1 + 8 + 8 + 1 + 6);
+                    
+                                memcpy(txpkt.payload,buffer,txpkt.size);
+                            
+                                lgw_send(txpkt);
+
+                            pthread_mutex_unlock(&lock);
+
+                        }
+                        else if(buffer[offset] == 0x87) // neighbor solicitation 
+                        {
+                            uint8_t node_mac[6],node_mac_aux[6];
+
+                            NodeList *device_info;
+                            printf("%s\n","Neighbor solicitation!" );
+
+                            packet_size = buffer[4] << 8 | buffer[5];
+
+                            for(i = 0; i < (packet_size + 40); i++)
+                            {
+                                printf("%i-",buffer[i] );
+                            }
+                            printf("\n--------------------------------------------------\n\n");
+
+                            //type
+                            offset += 1;
+
+                            // code
+                            offset += 1;
+
+                            // checksum
+                            offset += 2;
+
+                            // reserved
+                            offset += 4;
+
+                            // target address
+                            offset += 16;
+
+                            // option type
+                            if(buffer[offset] == 1)
+                            {
+                                offset += 1;
+                                
+                                // length
+                                if (buffer[offset] == 1)
+                                {
+                                    offset += 1;
+                                    for(i = 0; i < 6; i++)
+                                    {
+                                        node_mac[i] = buffer[offset + i];
+                                        node_mac_aux[i] = buffer[offset + i];
+                                    }
+                                }
+                                pthread_mutex_lock(&lock);
+
+                                    add_node(&list, node_mac, 0);
+
+                                    device_info = get_info_by_mac(list, node_mac_aux);
+                                
+                                pthread_mutex_unlock(&lock);
+                                
+                                if(device_info != NULL)
+                                {
+                                    memcpy(&buffer[0],neighbor_advertisement(buffer, IPv6_address(DEVEUI, IPv6), device_info->IPv6.addr),1500);
+                                    
+                                    printf("%s\n","Neighbor advertisement!" );
+
+                                    packet_size = buffer[4] << 8 | buffer[5];
+
+                                    for(i = 0; i < (packet_size + 40); i++)
+                                    {
+                                        printf("%i-",buffer[i] );
+                                    }
+                                    printf("\n--------------------------------------------------\n\n");
+
+
+                                    memcpy(buffer,schc_compression(buffer, value_rx->schc_buffer, value_rx->ipv6_header_schc),1500);
+
+                                    pthread_mutex_lock(&lock);
+
+                                        txpkt.size = (1 + 8 + 8);
+                    
+                                        memcpy(txpkt.payload,buffer,txpkt.size);
+                            
+                                        lgw_send(txpkt);
+
+                                    pthread_mutex_unlock(&lock);
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-            
+            } 
         }
     }
     return 0;
@@ -457,16 +675,11 @@ int main()
     uint8_t fdev_khz = DEFAULT_FDEV_KHZ;
     int tun_fd;
 
+    char *schc_buffer = malloc(sizeof(char*));
 
+    ip6_header_buffer * ipv6_header_schc = (ip6_header_buffer *)malloc(sizeof(ip6_header_buffer));
 
-    lowpan_header *lowpanSC = (lowpan_header*)malloc(sizeof(lowpan_header));
-    RoHC_base *RoV = (RoHC_base*)malloc(sizeof(RoHC_base));
-    RoHC_base *RoV2 = (RoHC_base*)malloc(sizeof(RoHC_base));
-
-    
-    
-    lowpan_header *lowpanh = (lowpan_header *)malloc(sizeof(lowpan_header));
-    ip6_buffer *decode = (ip6_buffer *)malloc(sizeof(ip6_buffer));
+    list  = NULL;
     /* clock and log rotation management */
     
     unsigned long pkt_in_log = 0; /* count the number of packet written in each log file */
@@ -545,32 +758,46 @@ int main()
     struct value_tx *value_tx = malloc(sizeof(struct value_tx));
 
     value_tx->tun_fd = tun_fd;
-    value_tx->lowpanh = lowpanh;
     value_tx->txpkt = txpkt;
     value_tx->delay = delay;
-    value_tx->lowpanSC = lowpanSC;
-    value_tx->RoV = RoV;
+    value_tx->schc_buffer = schc_buffer;
+    value_tx->ipv6_header_schc = ipv6_header_schc;
 
     struct value_rx *value_rx = malloc(sizeof(struct value_rx));
 
+    value_rx->txpkt = txpkt;
     value_rx->tun_fd = tun_fd;
-    value_rx->decode = decode;
-    value_rx->RoV = RoV2;
+    value_rx->schc_buffer = schc_buffer;
+    value_rx->ipv6_header_schc = ipv6_header_schc;
 
+    
     /*////////////////////////////////////////threads TX RX //////////////////////////////////////////////////////////////////////*/
+
+    if (pthread_mutex_init(&lock, NULL) != 0)
+    {
+        printf("\n mutex init failed\n");
+        return 1;
+    }
 
     pthread_create(&(tid[0]), NULL, send_package, value_tx);
 
     pthread_create(&(tid[1]), NULL, recive_package, value_rx);
+
+    pthread_create(&(tid[2]), NULL, menu, NULL);
     
     while(true)
     {
         sleep(1);
+        if(exit_program == 1)
+        {
+            break;
+        }
     }
 
+    pthread_mutex_destroy(&lock);
     /*////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
     
-    if (exit_sig == 1) {
+    if (exit_program == 1) {
         /* clean up before leaving */
         i = lgw_stop();
         if (i == LGW_HAL_SUCCESS) {

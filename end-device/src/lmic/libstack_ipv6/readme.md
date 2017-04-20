@@ -5,129 +5,133 @@
 The LoRa IPv6 library is compose by the following folders
 
 * IPv6: Contains basic functions for IPv6
-* LoWPAN_IPHC: Contains the functions to implement IPv6 over 6LoWPAN 
-* SCHC: Contains the functions to implement stactic context header compresion over 6LoWPAN.
+* SCHC: Contains the functions to implement stactic context header compresion over IPv6.
 * tun_tap: Contains the functions to work with a virtual network tunnel.
 
-## Library functions 
-### 1. LoWPAN_IPHC
+## Library functions  
 
-* **IPv6ToMesh**: This function dissects the IPv6 header to assemble it later in the 6LoWPAN format using the function. **reassemble_lowpan** 
-    * **reassemble_lowpan**: It build the 6LoWPAN format with the IPv6 header components.
-* **IPv6Rx**: It receive the 6LoWPAN buffer and decode it in a IPv6 buffer using the function **DecodeIPv6**.
-    * **DecodeIPv6**: It decode 6LoWPAN in IPv6. 
+### 1. SCHC
 
-### 2. SCHC
-
-* **SCHC_TX**: Using the function **check_rule**, this function compress the 6LoWPAN header in a  rule with the size of 1 Byte.
-    * **check_rule**: This function check if the 6LoWPAN header is in one of the SCHC rules. If exist return the rule.
-* **SCHC_RX**: This function receive the SCHC buffer and translates it to 6LowPAN buffer.
+* **schc_compression**: This function compress all the redundant information of the ICMPv6 header (IPv6 header + ICMPv6 header) and return a SCHC rule to send.
+    
+* **schc_decompression**: This function take the SCHC rule and transform it in a ICMPv6 packet to work with it.
  
-### 3. IPv6
+### 2. IPv6
 
-* **checksum_icmpv6**: It makes the 2 Bytes checksum for ICMPv6.
-* **checksum_schc**: It makes the 2 Bytes checksum for the SCHC buffer to check if it is correct.
+* **checksum_icmpv6**: Prepares the ICMPv6 packet to be processed in the **checksum** function.
+* **icmp_reply**: It makes an echo reply packet with the data of the echo request packet. 
+* **router_solicitation**: Generates a router solicitation packet.
+* **router_advertisement**: Generates a router advertisement packet.
+* **neighbor_solicitation**: Generates a neighbor solicitation packet.
+* **neighbor_advertisement**: Generates a neighbor advertisement packet.
+* **redirect**: Generates a redirect packet.
+* **add_node**: Adds the discovered node in a linked list.
+* **get_info_by_IPv6**: Returns the node info asked by IPv6.
+* **get_info_by_mac**: Returns the node info asked by mac.
 
-### 4. tun_tap
+## SCHC rule structure
 
-* **init_tun**: This function start the virtual network tunnel for the gateway with the interface **tun0**. The global address is **bbbb::1** and the link local address is **fe80::1**.
+next header | source address | multicast | destination address | icmpv6 type 
+--- | --- | --- | --- | --- 
+2 bits | 1 bit | 1 bit | 1 bit | 3 bit |
 
-## SCHC rules
-### Rule 1
+* The first 2 bits correspond to the next header where:
+    * 00 -> ICMPv6
+    * 01 -> reserved
+    * 10 -> reserved
+    * 11 -> reserved
+* The next bit correspond to the source address where:
+    * 0 -> link-local address
+    * 1 -> global address
+* The next bit correspond to multicast where:
+    * 0 -> is multicast
+    * 1 -> is not multicast
+* The next bit correspond to the destination address where:
+    * 0 -> link-local address
+    * 1 -> global address
 
-    Type Link-local (unicast)
+In case that the first 2 bits are 00 : 
+* The next 3 bits correspond to the ICMPv6 type where:
+    * 000 -> echo request
+    * 001 -> echo reply 
+    * 010 -> router solicitation
+    * 011 -> router advertisement
+    * 100 -> neighbor solicitation
+    * 101 -> neighbor advertisement
+    * 110 -> redirect
+    * 111 -> reserved
 
-    Last 8 Bytes
-        src[0] = 0;  dst[0] = 0;
-        src[1] = 0;  dst[1] = 0;
-        src[2] = 0;  dst[2] = 0;
-        src[3] = 0;  dst[3] = 0;
-        src[4] = 0;  dst[4] = 0;
-        src[5] = 0;  dst[5] = 0;
-        src[6] = 0;  dst[6] = 0;
-        src[7] = 1;  dst[7] = 3;
-        
-        Traffic class = 00
-        
-        Next header = ICMPv6
-        
-        Hop limit = 64
-        
-### Rule 2
+## SCHC rule tables
 
-    Type Link-local (unicast)
-
-    Last 8 Bytes
-        src[0] = 0;  dst[0] = 0;
-        src[1] = 0;  dst[1] = 0;
-        src[2] = 0;  dst[2] = 0;
-        src[3] = 0;  dst[3] = 0;
-        src[4] = 0;  dst[4] = 0;
-        src[5] = 0;  dst[5] = 0;
-        src[6] = 0;  dst[6] = 0;
-        src[7] = 3;  dst[7] = 1;
-        
-        Traffic class = 00
-        
-        Next header = ICMPv6
-        
-        Hop limit = 64
-                
-### Rule 3
-
-    Type Link-local (unicast)
-
-    Last 8 Bytes
-        src[0] = 0;  dst[0] = 0;
-        src[1] = 0;  dst[1] = 0;
-        src[2] = 0;  dst[2] = 0;
-        src[3] = 0;  dst[3] = 0;
-        src[4] = 0;  dst[4] = 0;
-        src[5] = 0;  dst[5] = 0;
-        src[6] = 0;  dst[6] = 0;
-        src[7] = 1;  dst[7] = 2;
-        
-        Traffic class = 00
-        
-        Next header = ICMPv6
-        
-        Hop limit = 64
-
-### Rule 4
-
-    Type Link-local (unicast)
-
-    Last 8 Bytes
-        src[0] = 0;  dst[0] = 0;
-        src[1] = 0;  dst[1] = 0;
-        src[2] = 0;  dst[2] = 0;
-        src[3] = 0;  dst[3] = 0;
-        src[4] = 0;  dst[4] = 0;
-        src[5] = 0;  dst[5] = 0;
-        src[6] = 0;  dst[6] = 0;
-        src[7] = 2;  dst[7] = 1;
-        
-        Traffic class = 00
-        
-        Next header = ICMPv6
-        
-        Hop limit = 64        
-### Rule 5
-    Type Link-local (Multicast)
-
-    Last 8 Bytes for src and last Byte for dst
-        src[0] = 0;  dst[0] = 1;
-        src[1] = 0;  
-        src[2] = 0;  
-        src[3] = 0;  
-        src[4] = 0;  
-        src[5] = 0;  
-        src[6] = 0;  
-        src[7] = 1;  
-        
-        Traffic class = 00
-        
-        Next header = ICMPv6
-        
-        Hop limit = 1
-
+| IPv6 header | schc rule | Description |
+ --- | --- | ---
+ Version | Elided | Redundant Data
+ Traffic Class | Elided | Redundant Data
+ Flow Label | Elided | Redundant Data
+ Payload Length | Elided | Can be calculate
+ Next Header | Elided | In SCHC rule
+ Hop limit | Elided | Redundant Data
+ Source Address | **Send** | last 8 bytes if it's link - local else full 16 bytes if it's global
+ Destination Address | **Send** | last 8 bytes if it's link - local else full 16 bytes if it's global
+ 
+ | Echo Request - Reply | schc rule | Description |
+ --- | --- | ---
+ Type | Elided | In SCHC rule
+ Code | Elided | Redundant Data
+ Checksum | Elided | Can be calculate
+ Identifier | **Send** | Ping ID 
+ Sequence Number| **Send** | Always different
+ 
+| Router Solicitation | schc rule | Description |
+ --- | --- | ---
+ Type | Elided | In SCHC rule
+ Code | Elided | Redundant Data
+ Checksum | Elided | Can be calculate
+ Reserved | Elided | Redundant Data 
+ 
+| Router Advertisement | schc rule | Description |
+ --- | --- | ---
+ Type | Elided | In SCHC rule
+ Code | Elided | Redundant Data
+ Checksum | Elided | Can be calculate
+ Cur Hop | Elided | Redundant Data 
+ Autoconfig Flags | Elided | Redundant Data 
+ Router Lifetime | Elided | Redundant Data 
+ Reachable Time | Elided | Redundant Data 
+ Retrans Timer | Elided | Redundant Data 
+ Option Type | **Send** | what option type
+ Option Length | Elided | Redundant Data 
+ Option Lynk - Layer| **Send** | gateway mac
+ 
+ | Neighbor Solicitation | schc rule | Description |
+ --- | --- | ---
+ Type | Elided | In SCHC rule
+ Code | Elided | Redundant Data
+ Checksum | Elided | Can be calculate
+ Reserved | Elided | Redundant Data 
+ Target address | Elided| Redundant Data 
+ Option Type | **Send** | what option type 
+ Option Length | Elided | Redundant Data 
+ Option Lynk - Layer| **Send** | node mac 
+ 
+ | Neighbor Advertisement | schc rule | Description |
+ --- | --- | ---
+ Type | Elided | In SCHC rule
+ Code | Elided | Redundant Data
+ Checksum | Elided | Can be calculate
+ Flags | Elided | Redundant Data 
+ Target Address | Elided | Redundant Data 
+ Option | Elided | Redundant Data 
+ 
+  | Redirect | schc rule | Description |
+ --- | --- | ---
+ Type | Elided | In SCHC rule
+ Code | Elided | Redundant Data
+ Checksum | Elided | Can be calculate
+ Reserved | Elided | Redundant Data 
+ Target Address | **Send** | 16 bytes for the new address
+ Destination Address | Elided | Redundant Data 
+ Option Type | **Send** | what option type 
+ Option Length | Elided | Redundant Data 
+ Option Lynk - Layer| **Send** | node mac 
+ 

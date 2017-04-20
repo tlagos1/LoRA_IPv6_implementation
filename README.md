@@ -8,7 +8,7 @@ This project aims to implement IPv6 for LoRa networks including  Neighbor Discov
 
 ## Objetive
 
-By using RoHC, this implementation will build a table inside the LoRa gateway to map the source IPv6 header to an internal ID which will be used to identify the flow to the end-device.  If the source device changes any section of the header, the GateWay will send that difference to the end device using the same flow ID.
+By using SCHC, this implementation will build a table inside the LoRa gateway to map the source IPv6 header to an internal ID which will be used to identify the flow to the end-device. Any redundant information will be elided for SCHC compression and will be write back in the SCHC decompression.
 
 ## Components
 
@@ -31,12 +31,12 @@ For the initial version of the project, the following software components are pl
 
 ### 1. IPv6 library: libstack_ipv6
 
-This directory contains the source to use IPv6 in the LoRa devices. It can be found at the following addresses:
+This directory contains the source to use IPv6 in the LoRa devices. they can be found at the following addresses:
 
 	- LoRaGateway/libstack_ipv6/
 	- end-device/src/lmic/libstack_ipv6/
 
-This library comes with the implementation of 6LoWPAN, SCHC and basics IPv6 functions explained in detail in its folder. 
+This library comes with the implementation of  SCHC and basics IPv6 functions explained in detail in its folder. 
 
 ### 2. IPv6 programs
 
@@ -60,13 +60,8 @@ The goal of this program is make the Arduino UNO + inAir9 works like a LoRa node
 
 In this project, the LoRa node was configured with the IP fe80::3.
 
-## Gateway diagram
-<img src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema1.png" data-canonical-src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema1.png" width="700" />
-
-## Node diagram
-<img src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema2.png" data-canonical-src="https://github.com/tlagos1/LoRA_IPv6_implementation/blob/develop/images/dia_sistema2.png" width="800" />
-
 ## Updates
+20/04/2017 : 6LoWPAN deleted, full implementation of schc for ICMPv6 (echo request, echo reply, router solicitation, router advertisement, neighbor solicitation, neighbor advertisement, redirect ) for a star topology, the discovered devices are stored in a linked list.
 
 15/03/2017 : Beginning multicast Development, Readmes Updates. 
 
