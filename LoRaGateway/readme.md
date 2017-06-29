@@ -70,6 +70,49 @@ chip through GPIO, before starting any application using the concentrator.
 4. Changelog
 -------------
 
+### v5.0.1 ###
+
+* HAL: Reworked the way the TX start delay is calculated, taking into account
+the delay introduced by TX notch filter (when enabled) and the delay linked to
+signal bandwidth separately.
+
+### v5.0.0 ###
+
+* HAL: Changed GPS module to get native GPS time (monotonic, no leap second).
+**WARNING**: The native GPS time is not given in standard NMEA messages, so we
+get it from a proprietary message of the GPS module used on gateway reference
+design, u-blox 7. If you are not using the same GPS module, you may have to
+update the lgw_parse_ubx() function.
+* HAL: Added lgw_cnt2gps() and lgw_gps2cnt() functions for SX1301<->GPS time
+conversion.
+* HAL: Changed serial port configuration for GPS to properly handle binary
+messages (UBX).
+* HAL: Added a lgw_gps_disable() function to restore serial configuration as
+it was before HAL initialization.
+* HAL: Fixed packet time on air calculation using the actual packet preamble
+size.
+* HAL: Adjusted TX_START_DELAY based on the board reference design to ensure
+that a packet is sent exactly at 1500µs after the TX trigger (TIMESTAMP or PPS),
+with a tolerance of +/- 1µs. This is mandatory to comply with LoRaWAN
+specification for Class-B beaconing precise timing.
+**WARNING**: This release provides tx start delay values to be used for Semtech
+reference designs AP1 and AP2. The HAL automatically detects the board version
+by detecting a FPGA or not. If you are using a different reference design or
+a different FPGA binary version than the one provided with this release, the
+value to be used for TX start delay may be different.
+
+### v4.1.3 ###
+
+* HAL: Reference clock frequency error improvement: The lora_gateway HAL has
+been updated (3 registers changed) to improve the performance of all gateways
+based on SX130x. The fix greatly improves the reception of packet at SF12, when
+the frequency offset of the incoming packet is large (mostly below -20ppm of
+frequency offset).
+
+WARNING: Systems which do not have the patch will be more prone to packet loss
+over time, when the crystals of the end-devices will be ageing and have more
+frequency offset.
+
 ### v4.1.2 ###
 
 * HAL: Changed configuration of IQ polarity of FPGA for TX to comply with FPGA

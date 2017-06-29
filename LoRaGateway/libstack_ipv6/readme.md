@@ -35,35 +35,36 @@ The LoRa IPv6 library is compose by the following folders
 
 ## SCHC rule structure
 
-next header | source address | multicast | destination address | icmpv6 type 
+Next Header | Source Address | Reserved | ICMPv6 | Concatenate 
 --- | --- | --- | --- | --- 
-2 bits | 1 bit | 1 bit | 1 bit | 3 bit |
+1 bits | 1 bit | 1 bit | 4 bit | 1 bit |
 
 * The first 2 bits correspond to the next header where:
-    * 00 -> ICMPv6
-    * 01 -> reserved
-    * 10 -> reserved
-    * 11 -> reserved
+    * 0 -> ICMPv6
+    * 1 -> reserved
 * The next bit correspond to the source address where:
     * 0 -> link-local address
     * 1 -> global address
-* The next bit correspond to multicast where:
+* The next bit correspond for future aplications:
     * 0 -> is multicast
     * 1 -> is not multicast
-* The next bit correspond to the destination address where:
-    * 0 -> link-local address
-    * 1 -> global address
-
-In case that the first 2 bits are 00 : 
-* The next 3 bits correspond to the ICMPv6 type where:
-    * 000 -> echo request
-    * 001 -> echo reply 
-    * 010 -> router solicitation
-    * 011 -> router advertisement
-    * 100 -> neighbor solicitation
-    * 101 -> neighbor advertisement
-    * 110 -> redirect
-    * 111 -> reserved
+In case that the first bits is 0 : 
+* The next 3 bits correspond to the ICMPv6 type and the last bit to the Target Address where:
+	* 000:0 -> echo request
+	* 001:0 -> echo reply 
+	* 010:0 -> router solicitation
+	* 011:0 -> router advertisement
+	* 100:b -> neighbor solicitation
+		* b = 0 -> Link-local target address
+		* b = 1 -> global target address
+	* 101:b -> neighbor advertisement
+		* b = 0 -> Link-local target address
+		* b = 1 -> global target address    
+ 	* 110:0 -> redirect
+	* 111:0 -> reserved
+* The next bit correspond for concatenation:
+	* 0 -> single package
+	* 1 -> There is a concatenate package next to the original 
 
 ## SCHC rule tables
 
@@ -76,7 +77,7 @@ In case that the first 2 bits are 00 :
  Next Header | Elided | In SCHC rule
  Hop limit | Elided | Redundant Data
  Source Address | **Send** | last 8 bytes if it's link - local else full 16 bytes if it's global
- Destination Address | **Send** | last 8 bytes if it's link - local else full 16 bytes if it's global
+ Destination Address | Elided | The Gateway keep the address
  
  | Echo Request - Reply | schc rule | Description |
  --- | --- | ---
@@ -92,6 +93,7 @@ In case that the first 2 bits are 00 :
  Code | Elided | Redundant Data
  Checksum | Elided | Can be calculate
  Reserved | Elided | Redundant Data 
+ MAC | **Send** | to be resolve
  
 | Router Advertisement | schc rule | Description |
  --- | --- | ---
@@ -103,7 +105,7 @@ In case that the first 2 bits are 00 :
  Router Lifetime | Elided | Redundant Data 
  Reachable Time | Elided | Redundant Data 
  Retrans Timer | Elided | Redundant Data 
- Option Type | **Send** | what option type
+ Option Type | Elided | Redundant Data
  Option Length | Elided | Redundant Data 
  Option Lynk - Layer| **Send** | gateway mac
  
@@ -113,10 +115,10 @@ In case that the first 2 bits are 00 :
  Code | Elided | Redundant Data
  Checksum | Elided | Can be calculate
  Reserved | Elided | Redundant Data 
- Target address | Elided| Redundant Data 
- Option Type | **Send** | what option type 
+ Target address | **Send** | who am I asking for 
+ Option Type | Elided | what option type 
  Option Length | Elided | Redundant Data 
- Option Lynk - Layer| **Send** | node mac 
+ Option Lynk - Layer| Elided | node mac 
  
  | Neighbor Advertisement | schc rule | Description |
  --- | --- | ---
@@ -124,7 +126,7 @@ In case that the first 2 bits are 00 :
  Code | Elided | Redundant Data
  Checksum | Elided | Can be calculate
  Flags | Elided | Redundant Data 
- Target Address | Elided | Redundant Data 
+ Target Address | **Send** | Who am I reply 
  Option | Elided | Redundant Data 
  
   | Redirect | schc rule | Description |

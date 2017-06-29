@@ -1,6 +1,12 @@
 
 /*Edited by Tomás Lagos*/
 
+typedef struct SCHC_data
+{
+   char *buffer;
+   uint16_t length;
+}SCHC_data;
+
 typedef struct ipv6_hdr {
    uint8_t version:4;
    uint8_t tclass;
@@ -14,9 +20,9 @@ typedef struct ipv6_hdr {
        uint8_t s6_addr[16];
    }ip6_src, ip6_dst;
     
-} ip6_header_buffer;
+}ip6_header_buffer;
 
-char *schc_compression(char *, char *, ip6_header_buffer *);
+SCHC_data *schc_compression(char *, char *, SCHC_data *);
 char *schc_decompression(char *, char *, int);
 char *SCHC_TX(char *, int);
 char *SCHC_RX(char *, int);

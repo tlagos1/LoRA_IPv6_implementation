@@ -13,39 +13,49 @@
 
 
 
-char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_header_schc)
+SCHC_data *schc_compression(char *buffer, char *schc_buffer, SCHC_data *SCHC)
 {
-    uint8_t rule_id = 0; 
 
-    int schc_offset = 1; // offset bytes for the return buffer (after rule_id)
+    uint8_t rule_id = 0; 
+    SCHC->length = 0;
+
+    int ix;
+
+    int schc_offset = 0; // offset bytes for the return buffer (after rule_id)
     int buffer_offset = 0;
 
+    char src_aux[16];
+
+
     char link_local_feight_bytes[8] = {0xfe, 0x80, 0, 0, 0, 0, 0, 0};
-    char multicast_feight_bytes[8] = {0xff, 0x02, 0, 0, 0, 0, 0, 0};
 
     // header first 4 bytes
 
-    ipv6_header_schc->version = (buffer[0] >> 4) & 15;
-    ipv6_header_schc->tclass = 0; // traffic class will be set in 0
-    ipv6_header_schc->flabel = 0; // flow label will be set in 0
+    uint8_t version = (buffer[0] >> 4) & 15;
+
+    // traffic class will be set in 0
+    // flow label will be set in 0
 
     // header next 4 bytes
 
-    ipv6_header_schc->paylength = (buffer[4] << 8) | buffer[5];
-    memcpy(&ipv6_header_schc->nheader,&buffer[6],1);
-    memcpy(&ipv6_header_schc->hlimit,&buffer[7],1);
-    
+    uint8_t paylength = (buffer[4] << 8) | buffer[5];    
+    uint8_t nheader = buffer[6];
+
+    // hop limit elided
+        
     // source address and destination address
 
-    memcpy(&ipv6_header_schc->ip6_src,&buffer[8],16);
-    memcpy(&ipv6_header_schc->ip6_dst,&buffer[24],16);
-    
+    for(ix = 0; ix < 16; ix++)
+    {
+        src_aux[ix] = buffer[8+ix];
+    }
+
     buffer_offset += 40;
 
     //fields
     // *The payload length is used only to get the payload
         // - version:
-    if(ipv6_header_schc->version == 6)
+    if(version == 6)
     {   
         // - traffic class elided
 
@@ -53,98 +63,64 @@ char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_h
 
         // - next header
 
-        if(ipv6_header_schc->nheader == 58)
+        if(nheader == 58)
         {   
-            rule_id |= (0 << 6); // ==> 00 ICMP
+            rule_id |= (0 << 7); // ==> 0 ICMP
         }
-
+        else
+        {
+            rule_id |= (1 << 7); // ==> 1 UDP
+        }
         // hop limit is omitted
 
         // - source address
-        if(memcmp(ipv6_header_schc->ip6_src.s6_addr,link_local_feight_bytes,8) == 0)
+        if(memcmp(src_aux, link_local_feight_bytes, 8) == 0)
         {
-
-            rule_id |= (0 << 5); 
-            memcpy(&schc_buffer[schc_offset], &ipv6_header_schc->ip6_src.s6_addr[8],8);
-            
-            schc_offset+=8; 
+            rule_id |= (0 << 6); 
         }
         else
         {
-            rule_id |= (1 << 5);
-            memcpy(&schc_buffer[schc_offset], &ipv6_header_schc->ip6_src,16);
-
-            schc_offset+=16;
+            rule_id |= (1 << 6);
         }
-
-        // - destination address
-
-        if(memcmp(multicast_feight_bytes, ipv6_header_schc->ip6_dst.s6_addr,8) == 0)
-        {
-            rule_id |= (0 << 4);
-            memcpy(&schc_buffer[schc_offset], &ipv6_header_schc->ip6_dst.s6_addr[8],8);
-
-            schc_offset+=8;
-
-        }
-        else
-        {
-            rule_id |= (1 << 4);
-            if(memcmp(ipv6_header_schc->ip6_dst.s6_addr,link_local_feight_bytes,8) == 0)
-            {
-                rule_id |= (0 << 3);
-                memcpy(&schc_buffer[schc_offset], &ipv6_header_schc->ip6_dst.s6_addr[8],8);
-
-                schc_offset+=8;
-            }
-            else
-            {
-                rule_id |= (1 << 3);
-                memcpy(&schc_buffer[schc_offset], &ipv6_header_schc->ip6_dst,16);
-
-                schc_offset+=16;      
-            }
-
-        }
-        
-        schc_buffer[0] = rule_id;
         
         ////////////////////////////////////ICMPv6//////////////////////////////
-        if(ipv6_header_schc->nheader == 58)
+        if(nheader == 58)
         {
             uint8_t request = 0x80, reply = 0x81 , rsolicitation = 0x85, radvertisement = 0x86, nsolicitation = 0x87, nadvertisement = 0x88, redirect = 0x89;
 
             //ICMP TYPE
             if(memcmp(&buffer[buffer_offset], &request ,1) == 0)
             {
-                rule_id |= (0 << 0); //==> 000 echo request
+                rule_id |= (0 << 2); //==> 000 echo request
             }
             else if(memcmp(&buffer[buffer_offset], &reply ,1) == 0)
             {
-                rule_id |= (1 << 0); //==> 001 echo reply
+                rule_id |= (1 << 2); //==> 001 echo reply
             }
             else if(memcmp(&buffer[buffer_offset], &rsolicitation ,1) == 0)
             {
-                rule_id |= (2 << 0); //==> 010 router solicitation
+                rule_id |= (2 << 2); //==> 010 router solicitation
             }
             else if(memcmp(&buffer[buffer_offset], &radvertisement ,1) == 0)
             {
-                rule_id |= (3 << 0); //==> 011 router advertisement
+                rule_id |= (3 << 2); //==> 011 router advertisement
             }
             else if(memcmp(&buffer[buffer_offset], &nsolicitation ,1) == 0)
             {
-                rule_id |= (4 << 0); //==> 100 neighbor solicitation
+                rule_id |= (4 << 2); //==> 100 neighbor solicitation
             }
             else if(memcmp(&buffer[buffer_offset], &nadvertisement ,1) == 0)
             {
-                rule_id |= (5 << 0); //==> 101 neighbor advertisement
+                rule_id |= (5 << 2); //==> 101 neighbor advertisement
             }
             else if(memcmp(&buffer[buffer_offset], &redirect ,1) == 0)
             {
-                rule_id |= (6 << 0); //==> 110 redirect
+                rule_id |= (6 << 2); //==> 110 redirect
             }
 
-            schc_buffer[0] = rule_id;
+            schc_buffer[schc_offset] = rule_id;
+            schc_offset += 1;
+            SCHC->length += 1;
 
             //type
             buffer_offset += 1;
@@ -161,16 +137,25 @@ char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_h
                 memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset],2);
                 schc_offset += 2;
                 buffer_offset += 2;
+                SCHC->length += 2;
 
                 // - sequece number
                 memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset],2);
                 schc_offset += 2;
                 buffer_offset += 2;
+                SCHC->length += 2;
+
+                //payload
+                memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset], paylength - (buffer_offset - 40));
+                SCHC->length += (paylength - (buffer_offset - 40));
             }
             else if(memcmp(&buffer[buffer_offset - 4], &rsolicitation ,1) == 0)
             {
-                //reserved
-                buffer_offset += 4;   
+                // send src addr
+                memcpy(&schc_buffer[schc_offset], &src_aux[8],8);
+                schc_offset += 8;
+                SCHC->length += 8;
+
             }
             else if(memcmp(&buffer[buffer_offset - 4], &radvertisement ,1) == 0)
             {
@@ -189,54 +174,61 @@ char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_h
                 //Retrans Timer elided
                 buffer_offset += 4;
 
-                //option
-                //-type
-                schc_buffer[schc_offset] = buffer[buffer_offset];
-                schc_offset += 1;
-                buffer_offset += 1;
-
-                //-length elided
-                buffer_offset += 1;
-
-                //lynk - layer
-                memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset],6);
-                schc_offset += 6;
-                buffer_offset += 6;
-
             }
-            else if(memcmp(&buffer[buffer_offset - 4], &nsolicitation ,1) == 0)
+            else if(memcmp(&buffer[buffer_offset - 4], &nsolicitation ,1) == 0)   // --->  Neighbor Solicitation
             {
+                // send src addr
+                if(memcmp(src_aux, &link_local_feight_bytes[0], 8) == 0)
+                {
+                    memcpy(&schc_buffer[schc_offset], &src_aux[8],8);
+                    schc_offset += 8;
+                    SCHC->length += 8;
+                }
+                else
+                {
+                    memcpy(&schc_buffer[schc_offset], &src_aux[0],16);
+                    schc_offset += 16;
+                    SCHC->length += 16;
+                }
                 //reserved elided
                 buffer_offset += 4;
 
-                //target address elided
-                buffer_offset += 16;
-
-                //option
-                //type
-                schc_buffer[schc_offset] = buffer[buffer_offset];
-                buffer_offset += 1;
-                schc_offset += 1;
-
-                //length elided
-                buffer_offset += 1;
-
-                //lynk - layer
-                memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset],6);
-                buffer_offset += 6;
-                schc_offset += 6;
-
+                //target address
+                if(memcmp(&buffer[buffer_offset], &link_local_feight_bytes[0], 8) == 0)
+                {
+                    schc_buffer[0] |= 0 << 1;
+                    memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset+8], 8);
+                    schc_offset += 8;
+                    SCHC->length += 8;
+                }
+                else
+                {
+                    schc_buffer[0] |= 1 << 1;
+                    memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset], 16);
+                    schc_offset += 16;
+                    SCHC->length += 16;
+                }
             }
-            else if(memcmp(&buffer[buffer_offset], &nadvertisement ,1) == 0)
+            else if(memcmp(&buffer[buffer_offset - 4], &nadvertisement ,1) == 0)   // --->  Neighbor Advertisement
             {
+
                 //flags elided
                 buffer_offset += 4;
-
                 //target address
-                buffer_offset += 16;
-
-                //option elided                
-
+                if(memcmp(&buffer[buffer_offset], &link_local_feight_bytes[0], 8) == 0)
+                {
+                    schc_buffer[0] |= 0 << 1;
+                    memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset + 8], 8);
+                    schc_offset += 8;
+                    SCHC->length += 8;
+                }
+                else
+                {
+                    schc_buffer[0] |= 1 << 1;
+                    memcpy(&schc_buffer[schc_offset ], &buffer[buffer_offset], 16);
+                    schc_offset += 16;
+                    SCHC->length += 16;
+                }
             }
             else if(memcmp(&buffer[buffer_offset], &redirect ,1) == 0)
             {
@@ -247,6 +239,7 @@ char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_h
                 memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset],16);
                 buffer_offset += 16;
                 schc_offset += 16;
+                SCHC->length += 16;
 
                 // destination address
                 buffer_offset += 16;
@@ -256,6 +249,7 @@ char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_h
                 schc_buffer[schc_offset] = buffer[buffer_offset];
                 buffer_offset += 1;
                 schc_offset += 1;
+                SCHC->length += 1;
 
                 //length elided
                 buffer_offset += 1;
@@ -264,12 +258,14 @@ char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_h
                 memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset],6);
                 buffer_offset += 6;
                 schc_offset += 6;
+                SCHC->length += 6;
             }
-            // - payload
-            memcpy(&schc_buffer[schc_offset], &buffer[buffer_offset],((ipv6_header_schc->paylength + 40) - buffer_offset));                
-
-
-            return schc_buffer;
+    
+            for (ix = 0; ix < SCHC->length; ix++)
+            {
+                SCHC->buffer[ix] = schc_buffer[ix];
+            }
+            return SCHC;
         }   
     }
     
@@ -278,13 +274,15 @@ char *schc_compression(char *buffer,char *schc_buffer, ip6_header_buffer *ipv6_h
 }
 
 
-char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int buffer_offset, int packet_size)
+char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int buffer_offset, int packet_size, uint8_t *mac)
 {
     uint16_t payload_length = 0;
     uint16_t checksum = 0;
 
-    int icmp = (schc_buffer[0] >> 0) & 7;
-
+    int icmp = (schc_buffer[0] >> 2) & 7;
+    int schc_src = (schc_buffer[0] >> 6) & 1;
+    int schc_target = (schc_buffer[0] >> 1) & 1;
+    int ix;
     // type
     if(icmp == 0)
     {
@@ -344,12 +342,35 @@ char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int b
     }
     else if(icmp == 2) // if it is router solicitation
     {
+        //src addr
+        memcpy(&buffer[16], &schc_buffer[schc_offset], 8);
+
+        //dst addr
+        buffer[24] = 0xff;
+        buffer[25] = 0x02;
+        buffer[39] = 0x02;
+
         // reseved
         buffer[buffer_offset] = 0;
         buffer[buffer_offset + 1] = 0;
         buffer[buffer_offset + 2] = 0;
         buffer[buffer_offset + 3] = 0;
         buffer_offset += 4;
+
+        //option
+        //-type
+        buffer[buffer_offset] = 1;
+        buffer_offset += 1;
+
+        //-length
+        buffer[buffer_offset] = 1;
+        buffer_offset += 1;
+
+        for(ix = 0; ix < 6; ix++)
+        {
+            buffer[buffer_offset + ix] = mac[ix];
+        }
+        buffer_offset += 6;
     }
     
     else if(icmp == 3) // if it is router advertisement
@@ -405,6 +426,18 @@ char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int b
     {
         int i;
 
+        if(schc_src == 0)
+        {
+            memcpy(&buffer[16], &schc_buffer[schc_offset], 8);
+            schc_offset += 8;
+        }
+        else
+        {
+            memcpy(&buffer[8], &schc_buffer[schc_offset], 16);
+            schc_offset += 16;
+        }
+        
+
         // reserved
         buffer[buffer_offset] = 0;
         buffer[buffer_offset+1] = 0;
@@ -413,25 +446,41 @@ char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int b
         buffer_offset += 4;  
 
         // target value
-        for(i = 0; i < 16; i++)
+        if(schc_target == 0)
         {
-            buffer[buffer_offset + i] = buffer[24 + i];
-        }
-        buffer_offset += 16;
+            memset(&buffer[buffer_offset], 0, 16);
+            buffer[buffer_offset] = 0xfe;
+            buffer[buffer_offset+1] = 0x80;
 
-        // option 
+            buffer_offset += 8;
+
+            for(i = 0; i < 8; i++)
+            {
+                buffer[buffer_offset + i] = schc_buffer[schc_offset + i];
+            }
+            buffer_offset += 8;
+        }
+        else
+        {
+            memcpy(&buffer[buffer_offset],&schc_buffer[schc_offset],16);
+            buffer_offset += 16; 
+            schc_offset += 16;
+        }
+        
+        //option
         //-type
-        memcpy(&buffer[buffer_offset],&schc_buffer[schc_offset],1);
+        buffer[buffer_offset] = 1;
         buffer_offset += 1;
-        schc_offset += 1;
 
         //-length
         buffer[buffer_offset] = 1;
         buffer_offset += 1;
 
-        //-link-layer
-        memcpy(&buffer[buffer_offset],&schc_buffer[schc_offset],6);
-        buffer_offset += 6; 
+        for(ix = 0; ix < 6; ix++)
+        {
+            buffer[buffer_offset + ix] = mac[ix];
+        }
+        buffer_offset += 6;
 
     }
     else if(icmp == 5) // if it is neighbor advertisement
@@ -439,19 +488,39 @@ char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int b
         int i;
 
         // flags
-        buffer[buffer_offset] = 1;
-        buffer[buffer_offset+1] = 1;
+        buffer[buffer_offset] = 0;
+        buffer[buffer_offset] |= 1 << 7; // 1 is router - 0 is node
+        buffer[buffer_offset] |= 1 << 6; // 1 is neighbor solicitation answer
+        buffer[buffer_offset] |= 0 << 5; // 1 rewrite cache from source device - 0 else
+        buffer[buffer_offset+1] = 0;
         buffer[buffer_offset+2] = 0;
         buffer[buffer_offset+3] = 0;
         buffer_offset += 4;  
 
         // target value
-        for(i = 0; i < 16; i++)
+        if(schc_target == 0)
         {
-            buffer[buffer_offset + i] = buffer[8 + i];
-        }
-        buffer_offset += 16;
+            memset(&buffer[buffer_offset], 0, 16);
+            buffer[buffer_offset] = 0xfe;
+            buffer[buffer_offset+1] = 0x80;
 
+            buffer_offset += 8;
+
+            for(i = 0; i < 8; i++)
+            {
+                buffer[buffer_offset + i] = schc_buffer[schc_offset + i];
+            }
+            buffer_offset += 8;
+        }
+        else
+        {
+            for(i = 0; i < 16; i++)
+            {
+                buffer[buffer_offset + i] = schc_buffer[schc_offset + i];
+            }
+            buffer_offset += 16;
+        }
+        
         // option elided
     }
     else if(icmp == 6) // redirect
@@ -494,10 +563,13 @@ char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int b
         // option elided
     }
 
-    // payload lenngth = (packet_size - schc_offset) + 8
     payload_length = (buffer_offset - 40);
+
     buffer[4] = (payload_length >> 8) & 255;
-    buffer[5] = (payload_length >> 0) & 255;    
+    buffer[5] = (payload_length >> 0) & 255;  
+
+
+
 
     // checksum
     checksum = checksum_icmpv6(buffer,(buffer_offset));
@@ -508,18 +580,16 @@ char *icmp_decompression(char *schc_buffer, char *buffer, int schc_offset, int b
     return buffer;
 }
 
-char *schc_decompression(char *schc_buffer, char *buffer, int packet_size)
+char *schc_decompression(char *schc_buffer, char *buffer, int packet_size, uint8_t *src, uint8_t *dst, uint8_t *mac)
 {
     int schc_offset = 1;
     int buffer_offset = 0; 
+    int ix;
 
     char link_local_feight_bytes[8] = {0xfe, 0x80, 0, 0, 0, 0, 0, 0};
-    char multicast_feight_bytes[8] = {0xff, 0x02, 0, 0, 0, 0, 0, 0};
 
-    int schc_header = (schc_buffer[0] >> 6) & 3;
-    int schc_src = (schc_buffer[0] >> 5) & 1;
-    int multicast = (schc_buffer[0] >> 4) & 1;
-    int schc_dst = (schc_buffer[0] >> 3) & 1;
+    int schc_header = (schc_buffer[0] >> 7) & 1;
+    int schc_src = (schc_buffer[0] >> 6) & 1;
 
     //4 bytes who were elided 
     buffer[0] = 0x60;
@@ -540,56 +610,56 @@ char *schc_decompression(char *schc_buffer, char *buffer, int packet_size)
     }
     
     // hop limit 
-    buffer[buffer_offset] = 1;
+    buffer[buffer_offset] = 255;
     buffer_offset += 1;
 
-    if(schc_src == 0) // => source address link local
+    if(src != NULL)
     {
-        memcpy(&buffer[buffer_offset], &link_local_feight_bytes[0], 8);
-        buffer_offset += 8;
-        
-        memcpy(&buffer[buffer_offset], &schc_buffer[schc_offset], 8);
-        buffer_offset += 8;
-        schc_offset += 8;
-    }
-    else // => source address global
-    {   
-        memcpy(&buffer[buffer_offset], &schc_buffer[schc_offset], 16);
+        for(ix = 0; ix < 16; ix++)
+        {
+            buffer[buffer_offset + ix] = src[ix];
+        }
         buffer_offset += 16;
-        schc_offset += 16;   
     }
-
-    if(multicast == 0) // => it is multicast
+    else
     {
-        memcpy(&buffer[buffer_offset], &multicast_feight_bytes[0], 8);
-        buffer_offset += 8;
-        
-        memcpy(&buffer[buffer_offset], &schc_buffer[schc_offset], 8);
-        buffer_offset += 8;
-        schc_offset += 8;
-    }
-    else // => it is not multicast
-    {
-        if(schc_dst == 0) // destination address is link local
+        if(schc_src == 0) // => source address link local
         {
             memcpy(&buffer[buffer_offset], &link_local_feight_bytes[0], 8);
             buffer_offset += 8;
-            
-            memcpy(&buffer[buffer_offset], &schc_buffer[schc_offset], 8);
-            buffer_offset += 8;
-            schc_offset += 8;
+        
+            if(schc_header == 0)
+            {
+                memset(&buffer[buffer_offset], 0, 8);
+                buffer_offset += 8;
+            }
         }
-        else  // destination address is global
+        else // => source address global
         {   
-            memcpy(&buffer[buffer_offset], &schc_buffer[schc_offset], 16);
-            buffer_offset += 16;
-            schc_offset += 16;   
-        }   
+            if(schc_header == 0)
+            {
+                memset(&buffer[buffer_offset], 0, 16);
+                buffer_offset += 16;
+            }  
+        }
+    }
+    if(dst != NULL)
+    {
+        for(ix = 0; ix < 16; ix++)
+        {
+            buffer[buffer_offset + ix] = dst[ix];
+        }
+        buffer_offset += 16;
+    }
+    else
+    {
+        memset(&buffer[buffer_offset], 0, 16);
+        buffer_offset += 16;
     }
     
     if(schc_header == 0)
     {
-        icmp_decompression(schc_buffer, buffer, schc_offset, buffer_offset, packet_size);
+        icmp_decompression(schc_buffer, buffer, schc_offset, buffer_offset, packet_size, mac);
     }
     return buffer;
 }

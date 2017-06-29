@@ -543,8 +543,7 @@ int main(int argc, char **argv)
     }
 
     /* TX gain config */
-    lgw_txgain_setconf(&txgain_lut);
-
+ 
     /* Start concentrator */
     i = lgw_start();
     if (i == LGW_HAL_SUCCESS) {

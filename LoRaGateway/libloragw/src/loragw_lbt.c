@@ -24,7 +24,6 @@ Maintainer: Michael Coracin
 
 #include "loragw_radio.h"
 #include "loragw_aux.h"
-#include "loragw_hal.h"
 #include "loragw_lbt.h"
 #include "loragw_fpga.h"
 
@@ -33,16 +32,15 @@ Maintainer: Michael Coracin
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #if DEBUG_LBT == 1
-    #define DEBUG_MSG(str)                fprintf(stderr, str)
-    #define DEBUG_PRINTF(fmt, args...)    fprintf(stderr,"%s:%d: "fmt, __FUNCTION__, __LINE__, args)
-    #define CHECK_NULL(a)                if(a==NULL){fprintf(stderr,"%s:%d: ERROR: NULL POINTER AS ARGUMENT\n", __FUNCTION__, __LINE__);return LGW_REG_ERROR;}
+    #define DEBUG_MSG(str)              fprintf(stderr, str)
+    #define DEBUG_PRINTF(fmt, args...)  fprintf(stderr,"%s:%d: "fmt, __FUNCTION__, __LINE__, args)
+    #define CHECK_NULL(a)               if(a==NULL){fprintf(stderr,"%s:%d: ERROR: NULL POINTER AS ARGUMENT\n", __FUNCTION__, __LINE__);return LGW_REG_ERROR;}
 #else
     #define DEBUG_MSG(str)
     #define DEBUG_PRINTF(fmt, args...)
-    #define CHECK_NULL(a)                if(a==NULL){return LGW_REG_ERROR;}
+    #define CHECK_NULL(a)               if(a==NULL){return LGW_REG_ERROR;}
 #endif
 
-#define TX_START_DELAY      1500
 #define LBT_TIMESTAMP_MASK  0x007FF000 /* 11-bits timestamp */
 
 /* -------------------------------------------------------------------------- */
@@ -52,10 +50,11 @@ Maintainer: Michael Coracin
 /* --- PRIVATE CONSTANTS ---------------------------------------------------- */
 
 /* -------------------------------------------------------------------------- */
-/* --- SHARED VARIABLES ---------------------------------------------------- */
+/* --- INTERNAL SHARED VARIABLES -------------------------------------------- */
 
 extern void *lgw_spi_target; /*! generic pointer to the SPI device */
 extern uint8_t lgw_spi_mux_mode; /*! current SPI mux mode used */
+extern uint16_t lgw_i_tx_start_delay_us;
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE VARIABLES ---------------------------------------------------- */
@@ -216,7 +215,7 @@ int lbt_start(void) {
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-int lbt_is_channel_free(struct lgw_pkt_tx_s * pkt_data, bool * tx_allowed) {
+int lbt_is_channel_free(struct lgw_pkt_tx_s * pkt_data, uint16_t tx_start_delay, bool * tx_allowed) {
     int i;
     int32_t val;
     uint32_t tx_start_time = 0;
@@ -256,7 +255,7 @@ int lbt_is_channel_free(struct lgw_pkt_tx_s * pkt_data, bool * tx_allowed) {
                 break;
             case ON_GPS:
                 DEBUG_MSG("tx_mode                    = ON_GPS\n");
-                tx_start_time = (sx1301_time + TX_START_DELAY + 1000000) & LBT_TIMESTAMP_MASK;
+                tx_start_time = (sx1301_time + (uint32_t)tx_start_delay + 1000000) & LBT_TIMESTAMP_MASK;
                 break;
             case IMMEDIATE:
                 DEBUG_MSG("ERROR: tx_mode IMMEDIATE is not supported when LBT is enabled\n");
@@ -268,7 +267,7 @@ int lbt_is_channel_free(struct lgw_pkt_tx_s * pkt_data, bool * tx_allowed) {
         /* Select LBT Channel corresponding to required TX frequency */
         lbt_channel_decod_1 = -1;
         lbt_channel_decod_2 = -1;
-        if (pkt_data->bandwidth == BW_125KHZ){
+        if (pkt_data->bandwidth == BW_125KHZ) {
             for (i=0; i<lbt_nb_active_channel; i++) {
                 if (is_equal_freq(pkt_data->freq_hz, lbt_channel_cfg[i].freq_hz) == true) {
                     DEBUG_PRINTF("LBT: select channel %d (%u Hz)\n", i, lbt_channel_cfg[i].freq_hz);

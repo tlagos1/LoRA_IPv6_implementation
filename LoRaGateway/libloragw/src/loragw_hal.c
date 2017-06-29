@@ -74,8 +74,6 @@ Maintainer: Sylvain Miermont
 #define MIN_FSK_PREAMBLE    3
 #define STD_FSK_PREAMBLE    5
 
-#define TX_START_DELAY      1500
-
 #define RSSI_MULTI_BIAS     -35 /* difference between "multi" modem RSSI offset and "stand-alone" modem RSSI offset */
 #define RSSI_FSK_POLY_0     60 /* polynomiam coefficients to linearize FSK RSSI */
 #define RSSI_FSK_POLY_1     1.5351
@@ -86,6 +84,8 @@ Maintainer: Sylvain Miermont
 #define LGW_RF_RX_BANDWIDTH_125KHZ  925000      /* for 125KHz channels */
 #define LGW_RF_RX_BANDWIDTH_250KHZ  1000000     /* for 250KHz channels */
 #define LGW_RF_RX_BANDWIDTH_500KHZ  1100000     /* for 500KHz channels */
+
+#define TX_START_DELAY_DEFAULT  1497 /* Calibrated value for 500KHz BW and notch filter disabled */
 
 /* constant arrays defining hardware capability */
 const uint8_t ifmod_config[LGW_IF_CHAIN_NB] = LGW_IFMODEM_CONFIG;
@@ -305,6 +305,11 @@ void lgw_constant_adjust(void) {
     // lgw_reg_w(LGW_MBWSSF_TRACKING_INTEGRAL,0); /* default 0 */
     // lgw_reg_w(LGW_MBWSSF_AGC_FREEZE_ON_DETECT,1); /* default 1 */
 
+    /* Improvement of reference clock frequency error tolerance */
+    lgw_reg_w(LGW_ADJUST_MODEM_START_OFFSET_RDX4, 1); /* default 0 */
+    lgw_reg_w(LGW_ADJUST_MODEM_START_OFFSET_SF12_RDX4, 4094); /* default 4092 */
+    lgw_reg_w(LGW_CORR_MAC_GAIN, 7); /* default 5 */
+
     /* FSK datapath setup */
     lgw_reg_w(LGW_FSK_RX_INVERT,1); /* default 0 */
     lgw_reg_w(LGW_FSK_MODEM_INVERT_IQ,1); /* default 0 */
@@ -323,7 +328,7 @@ void lgw_constant_adjust(void) {
     lgw_reg_w(LGW_FSK_PATTERN_TIMEOUT_CFG,128); /* sync timeout (allow 8 bytes preamble + 8 bytes sync word, default 0 */
 
     /* TX general parameters */
-    lgw_reg_w(LGW_TX_START_DELAY, TX_START_DELAY); /* default 0 */
+    lgw_reg_w(LGW_TX_START_DELAY, TX_START_DELAY_DEFAULT); /* default 0 */
 
     /* TX LoRa */
     // lgw_reg_w(LGW_TX_MODE,0); /* default 0 */
@@ -372,6 +377,36 @@ int32_t lgw_sf_getval(int x) {
         case DR_LORA_SF12: return 12;
         default: return -1;
     }
+}
+
+/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+
+uint16_t lgw_get_tx_start_delay(bool tx_notch_enable, uint8_t bw) {
+    float notch_delay_us = 0.0;
+    float bw_delay_us = 0.0;
+    float tx_start_delay;
+
+    /* Notch filtering performed by FPGA adds a constant delay (group delay) that we need to compensate */
+    if (tx_notch_enable) {
+        notch_delay_us = lgw_fpga_get_tx_notch_delay();
+    }
+
+    /* Calibrated delay brought by SX1301 depending on signal bandwidth */
+    switch (bw) {
+        case BW_125KHZ:
+            bw_delay_us = 1.5;
+            break;
+        case BW_500KHZ:
+            /* Intended fall-through: it is the calibrated reference */
+        default:
+            break;
+    }
+
+    tx_start_delay = (float)TX_START_DELAY_DEFAULT - bw_delay_us - notch_delay_us;
+
+    printf("INFO: tx_start_delay=%u (%f) - (%u, bw_delay=%f, notch_delay=%f)\n", (uint16_t)tx_start_delay, tx_start_delay, TX_START_DELAY_DEFAULT, bw_delay_us, notch_delay_us);
+
+    return (uint16_t)tx_start_delay; /* keep truncating instead of rounding: better behaviour measured */
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1307,6 +1342,8 @@ int lgw_send(struct lgw_pkt_tx_s pkt_data) {
     uint8_t target_mix_gain = 0; /* used to select the proper I/Q offset correction */
     uint32_t count_trig = 0; /* timestamp value in trigger mode corrected for TX start delay */
     bool tx_allowed = false;
+    uint16_t tx_start_delay;
+    bool tx_notch_enable = false;
 
     /* check if the concentrator is running */
     if (lgw_is_started == false) {
@@ -1368,6 +1405,14 @@ int lgw_send(struct lgw_pkt_tx_s pkt_data) {
         return LGW_HAL_ERROR;
     }
 
+    /* Enable notch filter for LoRa 125kHz */
+    if ((pkt_data.modulation == MOD_LORA) && (pkt_data.bandwidth == BW_125KHZ)) {
+        tx_notch_enable = true;
+    }
+
+    /* Get the TX start delay to be applied for this TX */
+    tx_start_delay = lgw_get_tx_start_delay(tx_notch_enable, pkt_data.bandwidth);
+
     /* interpretation of TX power */
     for (pow_index = txgain_lut.size-1; pow_index > 0; pow_index--) {
         if (txgain_lut.lut[pow_index].rf_power <= pkt_data.rf_power) {
@@ -1412,10 +1457,10 @@ int lgw_send(struct lgw_pkt_tx_s pkt_data) {
     buff[2] = 0xFF & part_frac; /* Least Significant Byte */
 
     /* metadata 3 to 6, timestamp trigger value */
-    /* TX state machine must be triggered at T0 - TX_START_DELAY for packet to start being emitted at T0 */
+    /* TX state machine must be triggered at (T0 - lgw_i_tx_start_delay_us) for packet to start being emitted at T0 */
     if (pkt_data.tx_mode == TIMESTAMPED)
     {
-        count_trig = pkt_data.count_us - TX_START_DELAY;
+        count_trig = pkt_data.count_us - (uint32_t)tx_start_delay;
         buff[3] = 0xFF & (count_trig >> 24);
         buff[4] = 0xFF & (count_trig >> 16);
         buff[5] = 0xFF & (count_trig >> 8);
@@ -1491,10 +1536,12 @@ int lgw_send(struct lgw_pkt_tx_s pkt_data) {
         if (pkt_data.bandwidth == BW_500KHZ) {
             buff[0] |= 0x80; /* Set MSB bit to enlarge analog filter for 500kHz BW */
         }
-        else if (pkt_data.bandwidth == BW_125KHZ){
-            buff[0] |= 0x40; /* Set MSB-1 bit to enable digital filter for 125kHz BW */
-        }
 
+        /* Set MSB-1 bit to enable digital filter if required */
+        if (tx_notch_enable == true) {
+            DEBUG_MSG("INFO: Enabling TX notch filter\n");
+            buff[0] |= 0x40;
+        }
     } else if (pkt_data.modulation == MOD_FSK) {
         /* metadata 7, modulation type, radio chain selection and TX power */
         buff[7] = (0x20 & (pkt_data.rf_chain << 5)) | 0x10 | (0x0F & pow_index); /* bit 4 is 1 -> FSK modulation */
@@ -1539,6 +1586,9 @@ int lgw_send(struct lgw_pkt_tx_s pkt_data) {
         return LGW_HAL_ERROR;
     }
 
+    /* Configure TX start delay based on TX notch filter */
+    lgw_reg_w(LGW_TX_START_DELAY, tx_start_delay);
+
     /* copy payload from user struct to buffer containing metadata */
     memcpy((void *)(buff + payload_offset), (void *)(pkt_data.payload), pkt_data.size);
 
@@ -1550,7 +1600,7 @@ int lgw_send(struct lgw_pkt_tx_s pkt_data) {
     lgw_reg_wb(LGW_TX_DATA_BUF_DATA, buff, transfer_size);
     DEBUG_ARRAY(i, transfer_size, buff);
 
-    x = lbt_is_channel_free(&pkt_data, &tx_allowed);
+    x = lbt_is_channel_free(&pkt_data, tx_start_delay, &tx_allowed);
     if (x != LGW_LBT_SUCCESS) {
         DEBUG_MSG("ERROR: Failed to check channel availability for TX\n");
         return LGW_HAL_ERROR;
@@ -1682,7 +1732,7 @@ uint32_t lgw_time_on_air(struct lgw_pkt_tx_s *packet) {
         Tsym = pow(2, SF) / BW;
 
         /* Duration of preamble */
-        Tpreamble = (8 + 4.25) * Tsym; /* 8 programmed symbols in preamble */
+        Tpreamble = ((double)(packet->preamble) + 4.25) * Tsym;
 
         /* Duration of payload */
         H = (packet->no_header==false) ? 0 : 1; /* header is always enabled, except for beacons */

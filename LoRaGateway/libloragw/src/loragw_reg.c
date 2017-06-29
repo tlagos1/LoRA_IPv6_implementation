@@ -388,8 +388,12 @@ const struct lgw_reg_s loregs[LGW_TOTALREGS] = {
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE VARIABLES ---------------------------------------------------- */
 
-void *lgw_spi_target = NULL; /*! generic pointer to the SPI device */
 static int lgw_regpage = -1; /*! keep the value of the register page selected */
+
+/* -------------------------------------------------------------------------- */
+/* --- INTERNAL SHARED VARIABLES -------------------------------------------- */
+
+void *lgw_spi_target = NULL; /*! generic pointer to the SPI device */
 uint8_t lgw_spi_mux_mode = 0; /*! current SPI mux mode used */
 
 /* -------------------------------------------------------------------------- */
