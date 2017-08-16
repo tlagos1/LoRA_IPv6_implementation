@@ -58,6 +58,8 @@ uint16_t checksum_icmpv6(char *,int);
 
 uint8_t *IPv6_address(uint8_t *, uint8_t *, int);
 
+NodeList *get_info_by_Router(NodeList *);
+
 NodeList *get_info_by_IPv6(NodeList *, uint8_t *);
 
 NodeList *get_info_by_eui(NodeList *, uint8_t *);

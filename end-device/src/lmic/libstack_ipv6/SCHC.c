@@ -168,6 +168,20 @@ SCHC_data *schc_compression(char *buffer, char *schc_buffer, SCHC_data *SCHC)
             }
             else if(memcmp(&buffer[buffer_offset - 4], &radvertisement ,1) == 0)
             {
+
+                if(memcmp(src_aux, &link_local_feight_bytes[0], 8) == 0)
+                {
+                    memcpy(&schc_buffer[schc_offset], &src_aux[8],8);
+                    schc_offset += 8;
+                    SCHC->length += 8;
+                }
+                else
+                {
+                    memcpy(&schc_buffer[schc_offset], &src_aux[0],16);
+                    schc_offset += 16;
+                    SCHC->length += 16;
+                }
+
                 //Cur Hop Limit elided
                 buffer_offset += 1;
 

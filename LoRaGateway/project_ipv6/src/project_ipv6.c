@@ -72,7 +72,8 @@ edited by Tomás Lagos
 pthread_t tid[2];
 pthread_mutex_t lock;
 
-int exit_program = 0;
+static int exit_sig = 0; /* 1 -> application terminates cleanly (shut down hardware, close open files, etc) */
+static int quit_sig = 0; /* 1 -> application terminates without shutting down the hardware */
 
 NodeList *list;
 IPv6PackageRawData *IPv6_data;
@@ -88,7 +89,6 @@ uint8_t ETH_mac[6]={0x33, 0x33, 0x00, 0x00, 0x00, 0x02};
 
 /* signal handling variables */
 struct sigaction sigact; /* SIGQUIT&SIGINT&SIGTERM signal handling */
-static int exit_sig = 0; /* 1 -> application terminates cleanly (shut down hardware, close open files, etc) */
 
 /* configuration variables needed by the application  */
 uint64_t lgwm = 0; /* LoRa gateway MAC address */
@@ -103,6 +103,8 @@ char log_file_name[64];
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS DECLARATION ---------------------------------------- */
+
+static void sig_handler(int sigio);
 
 int parse_SX1301_configuration();
 
@@ -119,6 +121,7 @@ void usage (void);
 struct value_tx
 { 
     int net_fd;
+    char *ifname;
     struct lgw_pkt_tx_s txpkt;
     int delay;
     char *schc_buffer;
@@ -133,6 +136,13 @@ struct value_rx
 
 };
 
+static void sig_handler(int sigio) {
+    if (sigio == SIGQUIT) {
+        quit_sig = 1;
+    } else if ((sigio == SIGINT) || (sigio == SIGTERM)) {
+        exit_sig = 1;
+    }
+}
 
 int parse_SX1301_configuration(const char * conf_file) {
     int i;
@@ -378,13 +388,13 @@ int parse_gateway_configuration(const char * conf_file) {
     json_value_free(root_val);
     return 0;
 }
-void *menu()
+void menu()
 {
 
     int option;
     int i;
     NodeList *aux;
-    while(true)
+    while(exit_sig != 1)
     {
         printf("\n\n\n");
         printf("======================================================================\n");
@@ -443,12 +453,7 @@ void *menu()
                     }
                     printf(" |\n");
                     aux = aux->next;
-                }
-            /*case 2:
-                pthread_mutex_lock(&lock);
-                    exit_program = 1; 
-                pthread_mutex_unlock(&lock);*/
-                              
+                }                             
         }
     }
 
@@ -459,17 +464,20 @@ void *send_package(void *data)
     struct value_tx *value_tx = data;
     struct lgw_pkt_tx_s txpkt = value_tx->txpkt;
 
+    uint8_t link_local_prefix[8] = {0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; 
+
     char buffer[1024];
     char schc_buffer[1024];
     char *recived_package;
     int ix;
-    NodeList *aux, *aux_info;
+    NodeList *aux, *aux_info = NULL;
     
     memset(buffer,0,1024);
 
     int net_fd = value_tx->net_fd;
+    char *ifname = value_tx->ifname; 
     
-    while(true)
+    while(exit_sig != 1)
     { 
         recived_package = recive_raw_package_by_interface(net_fd, buffer);
         if(recived_package != NULL)
@@ -499,22 +507,27 @@ void *send_package(void *data)
 
                         memset(buffer, 0, 1024);
                         txpkt.size = 0;
-                        for(ix = 0;ix < 8;ix++)
-                        {   
-                            buffer[ix] = aux_info->eui.addr[ix];
-                            txpkt.size ++;
-                        }
-                        for (ix = 0;ix < SCHC->length; ix++)
-                        {
-                            buffer[ix+8] = (char)SCHC->buffer[ix];
-                            txpkt.size ++;
-                        }
+                        
+                        if(aux_info != NULL)
+                        {  
 
-                        memcpy(txpkt.payload,buffer,txpkt.size);
-                        lgw_send(txpkt);
+                            for(ix = 0;ix < 8;ix++)
+                            {   
+                                buffer[ix] = aux_info->eui.addr[ix];
+                                txpkt.size ++;
+                            }
+                            for (ix = 0;ix < SCHC->length; ix++)
+                            {
+                                buffer[ix+8] = (char)SCHC->buffer[ix];
+                                txpkt.size ++;
+                            }
+
+                            memcpy(txpkt.payload,buffer,txpkt.size);
+                            lgw_send(txpkt);
+                        }
 
                     }
-                    if(buffer[40] == 0x86)
+                    else if(buffer[40] == 0x86)
                     {    
                         printf("Router Advertisement -->\n");
                         for(ix = 0; ix < 6; ix++)
@@ -547,60 +560,88 @@ void *send_package(void *data)
                                 buffer[ix+8] = (char)SCHC->buffer[ix];
                                 txpkt.size ++;
                             }
-                            
-                            memcpy(txpkt.payload,buffer,txpkt.size);
-                            lgw_send(txpkt);
+                            pthread_mutex_lock(&lock);
+                                memcpy(txpkt.payload,buffer,txpkt.size);
+                                lgw_send(txpkt);
+                            pthread_mutex_unlock(&lock);
                         }      
                     }
 
-                    if(buffer[40] == 0x87)
+                    else if(buffer[40] == 0x87)
                     {
                         printf("Neighbor solicitation -->\n");
                         
-                        SCHC = schc_compression(buffer, schc_buffer, SCHC);
-
-                        aux_info = get_info_by_IPv6(list, IPv6_data->IPv6_dst.addr);
-
-                        pthread_mutex_lock(&lock);
-                            S_addr = input_addr(aux_info->eui.addr, IPv6_data->IPv6_src.addr, IPv6_data->IPv6_dst.addr, S_addr, 1);
-                        pthread_mutex_unlock(&lock);
-                        
-                        memset(buffer, 0, 1024);
-                        txpkt.size = 0;
-                        for(ix = 0;ix < 8;ix++)
-                        {   
-                            buffer[ix] = aux_info->eui.addr[ix];
-                            txpkt.size ++;
-                        }
-                        for (ix = 0;ix < SCHC->length; ix++)
+                        aux_info = get_info_by_IPv6(list, ICMP6_data->target);
+                        if(aux_info != NULL)
                         {
-                            buffer[ix+8] = (char)SCHC->buffer[ix];
-                            txpkt.size ++;
-                        }
+                            if(memcmp(&ICMP6_data->target[0], link_local_prefix, 8) == 0)
+                            {
+                                SCHC = schc_compression(buffer, schc_buffer, SCHC);
+                                aux_info = get_info_by_IPv6(list, IPv6_data->IPv6_dst.addr);
 
-                        memcpy(txpkt.payload,buffer,txpkt.size);
-                        lgw_send(txpkt);
+                                if(aux_info != NULL)
+                                {   
+                                    memset(buffer, 0, 1024);
+                                    txpkt.size = 0;
+                                    for(ix = 0;ix < 8;ix++)
+                                    {   
+                                        buffer[ix] = aux_info->eui.addr[ix];
+                                        txpkt.size ++;
+                                    }
+                                    for (ix = 0;ix < SCHC->length; ix++)
+                                    {
+                                        buffer[ix+8] = (char)SCHC->buffer[ix];
+                                        txpkt.size ++;
+                                    }
+                                    pthread_mutex_lock(&lock);
+                                        memcpy(txpkt.payload,buffer,txpkt.size);
+                                        lgw_send(txpkt);
+                                    pthread_mutex_unlock(&lock);    
+                                }    
+                            }
+                            
+                            
+                            pthread_mutex_lock(&lock);
+                                if(send_raw_package(neighbor_advertisement(buffer, aux_info->IPv6_link_local.addr, IPv6_data->IPv6_src.addr,  ICMP6_data->target), aux_info->mac.addr , ETH_mac, ifname, net_fd) < 0)
+                                {
+                                    printf("Error sending raw socket\n");
+                                }
+                                else
+                                {
+                                    printf("Neighbor Advertisement <--\n");
+                                }
+                            pthread_mutex_unlock(&lock);
+                            
+                        }
+                        
                     }
-                    if(buffer[40] == 0x88)
+                    else if(buffer[40] == 0x88)
                     {
                         printf("Neighbor Advertisement -->\n");
                         SCHC = schc_compression(buffer, schc_buffer, SCHC);
 
                         memset(buffer, 0, 1024);
-                        txpkt.size = 0;
-                        for(ix = 0;ix < 8;ix++)
-                        {   
-                            buffer[ix] = aux_info->eui.addr[ix];
-                            txpkt.size ++;
-                        }
-                        for (ix = 0;ix < SCHC->length; ix++)
-                        {
-                            buffer[ix+8] = (char)SCHC->buffer[ix];
-                            txpkt.size ++;
-                        }
+                        aux_info = get_info_by_IPv6(list, IPv6_data->IPv6_dst.addr);
 
-                        memcpy(txpkt.payload,buffer,txpkt.size);
-                        lgw_send(txpkt);
+                        if(aux_info != NULL)
+                        {
+                       
+                            txpkt.size = 0;
+                            for(ix = 0;ix < 8;ix++)
+                            {   
+                                buffer[ix] = aux_info->eui.addr[ix];
+                                txpkt.size ++;
+                            }
+                            for (ix = 0;ix < SCHC->length; ix++)
+                            {
+                                buffer[ix+8] = (char)SCHC->buffer[ix];
+                                txpkt.size ++;
+                            }
+                            pthread_mutex_lock(&lock);
+                                memcpy(txpkt.payload,buffer,txpkt.size);
+                                lgw_send(txpkt);
+                            pthread_mutex_unlock(&lock); 
+                        }
                     }
 
                     break;
@@ -612,6 +653,7 @@ void *send_package(void *data)
             }
         }
     }
+    return 0;
 }
 
 void *recive_package(void *data)
@@ -633,13 +675,14 @@ void *recive_package(void *data)
     int nb_pkt;
 
     NodeList *aux_list;
+    NodeList *router_list;
     Saved_addr *aux_S_addr;
 
     int ix,j;
-    uint8_t target_addr[16];
+    uint8_t dst_addr[16];
     char buffer[1500];
   
-    while(true)
+    while(exit_sig != 1)
     {
         /*offset = 40;*/
         nb_pkt = lgw_receive(ARRAY_SIZE(rxpkt), rxpkt);
@@ -678,25 +721,31 @@ void *recive_package(void *data)
                             memcpy(&buffer[0],schc_decompression(schc_buffer, buffer, (p->size - 8), aux_S_addr->dst_addr.addr, aux_S_addr->src_addr.addr, aux_list->mac.addr), 1500);
                         }
                     }
-                    if(((schc_buffer[0] >> 2) & 7) == 2)
+                    else if(((schc_buffer[0] >> 2) & 7) == 2)
                     {
                         printf("router solicitation  <-- \n");
                         memcpy(&buffer[0],schc_decompression(schc_buffer, buffer, (p->size - 8), NULL, NULL, aux_list->mac.addr), 1500);
                     }
                     else if(((schc_buffer[0] >> 2) & 7) == 4)
                     {
-                        printf("Neighbor solicitation  <-- \n");
-                        if(p->size == 33)
+
+                        printf("Neighbor solicitation  <--\n");
+                        
+                        router_list = get_info_by_Router(list);
+
+                        if(router_list != NULL)
                         {
-                            memset(target_addr, 0 ,16);
-                            target_addr[0] = 0xfe;
-                            target_addr[1] = 0x80;
-                            for(ix = 0; ix < 8; ix++)
+                            memset(dst_addr, 0 ,16);
+                        
+                            for(ix = 0; ix < 16; ix++)
                             {
-                                target_addr[ix + 8] = schc_buffer[ix + 17];
+                                dst_addr[ix] = router_list->IPv6_link_local.addr[ix];
                             }
-                            memcpy(&buffer[0],schc_decompression(schc_buffer, buffer, (p->size - 8), NULL, target_addr, aux_list->mac.addr), 1500);
-                        }    
+                            memcpy(&buffer[0],schc_decompression(schc_buffer, buffer, (p->size - 8), NULL, dst_addr, aux_list->mac.addr), 1500);
+                        
+                        }
+                        
+                           
                     }
                     else if(((schc_buffer[0] >> 2) & 7) == 5)
                     {
@@ -726,15 +775,18 @@ void *recive_package(void *data)
                     {
                         src_addr[ix] = buffer[ix + 8];
                     }
+
+
                     pthread_mutex_lock(&lock);
                         list = add_IPv6_node(list, src_addr, aux_list->mac.addr);
                     pthread_mutex_unlock(&lock);
                    
-
+                    pthread_mutex_lock(&lock);
                     if(send_raw_package(buffer, get_info_by_eui(list, EUI_node)->mac.addr , ETH_mac, ifname, net_fd) < 0)
                     {
                         printf("Error sending raw socket\n");
                     }
+                    pthread_mutex_unlock(&lock);
                 }
             } 
         }
@@ -749,14 +801,12 @@ int main()
 {
     int i;
     int delay =1000;
-    struct lgw_conf_rxrf_s rfconf;
     struct lgw_pkt_tx_s txpkt;
     uint32_t f_target = 868300000;
-    int pow = 14;
+    int pow = 20;
     char mod[64] = DEFAULT_MODULATION;
-    uint32_t tx_notch_freq = DEFAULT_NOTCH_FREQ;
     int bw = 125;
-    int sf = 7;
+    int sf = 10;
 
     int cr = 1;
     bool invert = false;
@@ -766,11 +816,10 @@ int main()
     uint8_t fdev_khz = DEFAULT_FDEV_KHZ;
     int net_fd;
 
-    enum lgw_radio_type_e radio_type = LGW_RADIO_TYPE_SX1257;
-
     char *schc_buffer = malloc(sizeof(char*));
 
     list  = NULL;
+
 
     IPv6_data = (IPv6PackageRawData *)malloc(sizeof(IPv6PackageRawData));
 
@@ -784,11 +833,19 @@ int main()
     /* configuration files management */
     
     parse_SX1301_configuration(global_conf_fname);
-    //parse_gateway_configuration(global_conf_fname);
+
+    /* configure signal handling */
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = 0;
+    sigact.sa_handler = sig_handler;
+    sigaction(SIGQUIT, &sigact, NULL);
+    sigaction(SIGINT, &sigact, NULL);
+    sigaction(SIGTERM, &sigact, NULL);
+
     
     char *ifname = "eth0";
+   
     net_fd = init_socket();
-
 
     if(net_fd == -1)
     {
@@ -806,7 +863,6 @@ int main()
         return EXIT_FAILURE;
     }
 
-    /* opening log file and writing CSV header*/
 
     memset(&txpkt, 0, sizeof(txpkt));
     txpkt.freq_hz = f_target;
@@ -857,6 +913,7 @@ int main()
     struct value_tx *value_tx = malloc(sizeof(struct value_tx));
 
     value_tx->net_fd = net_fd;
+    value_tx->ifname = ifname;
     value_tx->txpkt = txpkt;
     value_tx->delay = delay;
     value_tx->schc_buffer = schc_buffer;
@@ -885,7 +942,7 @@ int main()
     pthread_mutex_destroy(&lock);
     /*////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
     
-    if (exit_program == 1) {
+    if (exit_sig == 1) {
         /* clean up before leaving */
         i = lgw_stop();
         if (i == LGW_HAL_SUCCESS) {

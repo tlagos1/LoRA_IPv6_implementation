@@ -141,6 +141,30 @@ uint8_t *IPv6_address(uint8_t *last_B_addr, uint8_t *IPv6_addr, int type)
   return IPv6_addr;
 }
 
+NodeList *get_info_by_Router(NodeList *list)
+{
+  list = check_head(list);
+  
+  if(list != NULL)
+  {
+    while(list != NULL)
+    {
+      
+      if(list->type == 1)
+      {
+        return list;
+      }
+      
+      else
+      {
+        list = list->next;
+      }
+      
+    }
+  }
+  return NULL;
+}
+
 NodeList *get_info_by_IPv6(NodeList *list, uint8_t *IPv6)
 { 
   uint8_t IPv6_link_local[8] = {0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00};
@@ -834,12 +858,13 @@ char *neighbor_solicitation(char *buffer, uint8_t *IPv6_address, uint8_t *IPv6_d
   return buffer;
 }
 
-char *neighbor_advertisement(char *buffer, uint8_t *IPv6_address, uint8_t *dst_address, uint8_t *target_address)
+char *neighbor_advertisement(char *buffer, uint8_t *src_address, uint8_t *dst_address,  uint8_t *target_address)
 {
   int offset = 0;
   uint16_t payload_length = 0;
   uint16_t checksum = 0;
-  
+  int ix;
+
   // version, traffic class, flow label
   buffer[0] = 0x60;
   buffer[1] = 0;
@@ -863,12 +888,18 @@ char *neighbor_advertisement(char *buffer, uint8_t *IPv6_address, uint8_t *dst_a
   offset += 1;  
 
   //soure address
-  memcpy(&buffer[offset], &IPv6_address[0],16);
-
+  for (ix = 0; ix < 16; ix++)
+  {
+    buffer[offset + ix] = src_address[ix];
+  }
+  
   offset += 16;
 
   //destination address
-  memcpy(&buffer[offset], &dst_address[0],16);
+  for (ix = 0; ix < 16; ix++)
+  {
+    buffer[offset + ix] = dst_address[ix];
+  }
 
   offset += 16;
 
@@ -898,7 +929,11 @@ char *neighbor_advertisement(char *buffer, uint8_t *IPv6_address, uint8_t *dst_a
   offset += 4;  
 
   //target address
-  memcpy(&buffer[offset],&target_address[0],16);
+  for (ix = 0; ix < 16; ix++)
+  {
+    buffer[offset + ix] = target_address[ix];
+  }
+
   offset += 16;  
 
   //option - elided
@@ -915,6 +950,7 @@ char *neighbor_advertisement(char *buffer, uint8_t *IPv6_address, uint8_t *dst_a
 
   return buffer;   
 }
+
 
 // optional
 char *redirect(char *buffer, uint8_t *IPv6_address, uint8_t *dst_address, uint8_t *target_addres, uint8_t *mac_address)

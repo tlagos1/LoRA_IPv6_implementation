@@ -79,21 +79,30 @@ static void listening_mode (osjob_t* job) {
       
       if(SCHC_type == 0)  // echo request
       {
-          os_setTimedCallback(&txjob, os_getTime() + ms2osticks(0), Echo_replay);
+          os_setTimedCallback(&txjob, os_getTime() + ms2osticks(TX_INTERVAL), Echo_replay);
       }
       
       if(SCHC_type == 3)
       {
-        //Serial.println("Router Advertisement <--");
+        //     "Router Advertisement;
         solicitation = 0;
-        memset(LMIC.frame, 0, LMIC.dataLen);
-        
+        offset += 1;
+        src_NS[0] = 0xfe;
+        src_NS[1] = 0x80;
+        for(ix = 0; ix < 16; ix++)
+        {
+            if(ix < 8)
+            {
+                src_NS[ix+8] =  LMIC.frame[(offset) + ix];
+            }                
+        }
       }
       if(SCHC_type == 4)
       {
+         //     "Neighbor Solicitation;
         memset(src_NS, 0 , 16);
         memset(target_ND, 0 , 16);
-        
+
         offset += 1;
 
         if(SCHC_src == 0 && SCHC_target == 0 )
@@ -107,56 +116,11 @@ static void listening_mode (osjob_t* job) {
                 src_NS[ix+8] =  LMIC.frame[offset + ix];
                 target_ND[ix+8] =  LMIC.frame[(offset + 8) + ix];
             }
-        }
-        else if(SCHC_src == 1 && SCHC_target == 0 )
-        {
-            
-            target_ND[0] = 0xfe;
-            target_ND[1] = 0x80;
-            for(ix = 0; ix < 16; ix++)
+            if(memcmp(IPv6_address(DEVEUI, IPv6, 0), target_ND, 16) == 0)
             {
-                if(ix < 8)
-                {
-                  target_ND[ix+8] =  LMIC.frame[(offset + 16) + ix];
-                }
-                src_NS[ix] =  LMIC.frame[offset + ix];
-                
+              solicitation = 1;
+              os_setTimedCallback(&txjob, os_getTime() + ms2osticks(TX_INTERVAL), Neighbor_Solicitation);
             }
-        }
-        else if(SCHC_src == 0 && SCHC_target == 1)
-        {
-            
-            src_NS[0] = 0xfe;
-            src_NS[1] = 0x80;
-            for(ix = 0; ix < 16; ix++)
-            {
-                if(ix < 8)
-                {
-                  src_NS[ix+8] =  LMIC.frame[offset + ix];
-                }
-                target_ND[ix] =  LMIC.frame[(offset + 8) + ix];
-            }
-        }
-        else if(SCHC_src == 1 && SCHC_target == 1)
-        {
-            for(ix = 0; ix < 16; ix++)
-            {
-                src_NS[ix] =  LMIC.frame[offset + ix];
-                target_ND[ix] =  LMIC.frame[(offset + 16) + ix];
-            }
-        }
-          
-        if(memcmp(IPv6_address(DEVEUI, IPv6, 0), target_ND, 16) == 0)
-        {
-          //Serial.println("Neighbor Solicitation <--"); 
-          advertisement = 1;
-          os_setTimedCallback(&txjob, os_getTime() + ms2osticks(0), Neighbor_Advertisement);
-        }
-        if(memcmp(IPv6_address(DEVEUI, IPv6, 1), target_ND, 16) == 0)
-        {
-          //Serial.println("Neighbor Solicitation <-- global"); 
-          advertisement = 1;
-          os_setTimedCallback(&txjob, os_getTime() + ms2osticks(0), Neighbor_Advertisement);
         }
       }
 
@@ -192,7 +156,7 @@ static void listening_mode (osjob_t* job) {
       }
     }
   }
-  rx(rx_done_listening_mode);
+  rx(listening_mode);
 }
 
 static void Echo_replay(osjob_t* job) {
@@ -247,6 +211,7 @@ static void Neighbor_Advertisement(osjob_t* job) {
 static void Neighbor_Solicitation(osjob_t* job){
     if(solicitation == 1)
     {
+      
       char buffer[200],schc_buffer[200];
       int ix;
       uint8_t IPv6[16];
@@ -257,7 +222,6 @@ static void Neighbor_Solicitation(osjob_t* job){
         mac[ix] = DEVEUI[ix + 2];
       }
   
-      //Serial.println("neighbor solicitation -->");
       for(ix = 0; ix < 16; ix++)
       {
         target_ND[ix] = src_NS[ix];
@@ -361,11 +325,11 @@ void setup() {
   LMIC.freq = 902300000;
 #endif
   // Maximum TX power
-  LMIC.txpow = 14;
+  LMIC.txpow = 25;
   // Use a medium spread factor. This can be increased up to SF12 for
   // better range, but then the interval should be (significantly)
   // lowered to comply with duty cycle limits as well.
-  LMIC.datarate = DR_SF7;
+  LMIC.datarate = DR_SF10;
   // This sets CR 4/5, BW125 (except for DR_SF7B, which uses BW250)
   LMIC.rps = updr2rps(LMIC.datarate);
   // setup initial job
